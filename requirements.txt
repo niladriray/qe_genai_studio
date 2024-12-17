@@ -1,0 +1,8 @@
+requests
+sqlalchemy
+openpyxl
+langchain
+openai
+transformers
+huggingface-hub
+pandas
