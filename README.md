@@ -96,4 +96,4 @@ Advantages of This Design
 	4.	LangChain Integration:
 	•	Modular and scalable pipeline for embedding, querying, and generation.
 	5.	Persistent Storage:
-	•	Automatically stores generated test cases in the embedding store for future use.
+	•	Automatically stores generated test cases in the embedding store for future use.# pncgenai
