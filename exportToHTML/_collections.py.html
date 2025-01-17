@@ -1,0 +1,378 @@
+<html>
+<head>
+<title>_collections.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_collections.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Mapping</span><span class="s2">, </span><span class="s1">MutableMapping</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">Mapping</span><span class="s2">, </span><span class="s1">MutableMapping</span>
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">threading </span><span class="s0">import </span><span class="s1">RLock</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:  </span><span class="s3"># Platform-specific: No threads available</span>
+
+    <span class="s0">class </span><span class="s1">RLock</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">__enter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">def </span><span class="s1">__exit__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">exc_type</span><span class="s2">, </span><span class="s1">exc_value</span><span class="s2">, </span><span class="s1">traceback</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">OrderedDict</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">exceptions </span><span class="s0">import </span><span class="s1">InvalidHeader</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">packages </span><span class="s0">import </span><span class="s1">six</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">packages</span><span class="s2">.</span><span class="s1">six </span><span class="s0">import </span><span class="s1">iterkeys</span><span class="s2">, </span><span class="s1">itervalues</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s4">&quot;RecentlyUsedContainer&quot;</span><span class="s2">, </span><span class="s4">&quot;HTTPHeaderDict&quot;</span><span class="s2">]</span>
+
+
+<span class="s1">_Null </span><span class="s2">= </span><span class="s1">object</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">RecentlyUsedContainer</span><span class="s2">(</span><span class="s1">MutableMapping</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Provides a thread-safe dict-like container which maintains up to 
+    ``maxsize`` keys while throwing away the least-recently-used keys beyond 
+    ``maxsize``. 
+ 
+    :param maxsize: 
+        Maximum number of recent elements to retain. 
+ 
+    :param dispose_func: 
+        Every time an item is evicted from the container, 
+        ``dispose_func(value)`` is called.  Callback which will get called 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">ContainerCls </span><span class="s2">= </span><span class="s1">OrderedDict</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">=</span><span class="s6">10</span><span class="s2">, </span><span class="s1">dispose_func</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_maxsize </span><span class="s2">= </span><span class="s1">maxsize</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func </span><span class="s2">= </span><span class="s1">dispose_func</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_container </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">ContainerCls</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">lock </span><span class="s2">= </span><span class="s1">RLock</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s3"># Re-insert the item, moving it to the end of the eviction line.</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s1">item </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">key</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">item</span>
+            <span class="s0">return </span><span class="s1">item</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s1">evicted_value </span><span class="s2">= </span><span class="s1">_Null</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s3"># Possibly evict the existing value of 'key'</span>
+            <span class="s1">evicted_value </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">_Null</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">value</span>
+
+            <span class="s3"># If we didn't evict an existing value, we might have to evict the</span>
+            <span class="s3"># least recently used item from the beginning of the container.</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">) &gt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_maxsize</span><span class="s2">:</span>
+                <span class="s1">_key</span><span class="s2">, </span><span class="s1">evicted_value </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">popitem</span><span class="s2">(</span><span class="s1">last</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func </span><span class="s0">and </span><span class="s1">evicted_value </span><span class="s0">is not </span><span class="s1">_Null</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func</span><span class="s2">(</span><span class="s1">evicted_value</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__delitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s1">value </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s1">key</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span>
+            <span class="s4">&quot;Iteration over this class is unlikely to be threadsafe.&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">clear</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s3"># Copy pointers to all values, then wipe the mapping</span>
+            <span class="s1">values </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">itervalues</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">))</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">value </span><span class="s0">in </span><span class="s1">values</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">dispose_func</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">keys</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">list</span><span class="s2">(</span><span class="s1">iterkeys</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">))</span>
+
+
+<span class="s0">class </span><span class="s1">HTTPHeaderDict</span><span class="s2">(</span><span class="s1">MutableMapping</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    :param headers: 
+        An iterable of field-value pairs. Must not contain multiple field names 
+        when compared case-insensitively. 
+ 
+    :param kwargs: 
+        Additional field-value pairs to pass in to ``dict.update``. 
+ 
+    A ``dict`` like container for storing HTTP Headers. 
+ 
+    Field names are stored and compared case-insensitively in compliance with 
+    RFC 7230. Iteration provides the first case-sensitive key seen for each 
+    case-insensitive pair. 
+ 
+    Using ``__setitem__`` syntax overwrites fields that compare equal 
+    case-insensitively in order to maintain ``dict``'s api. For fields that 
+    compare equal, instead create a new ``HTTPHeaderDict`` and use ``.add`` 
+    in a loop. 
+ 
+    If multiple fields that are equal case-insensitively are passed to the 
+    constructor or ``.update``, the behavior is undefined and some will be 
+    lost. 
+ 
+    &gt;&gt;&gt; headers = HTTPHeaderDict() 
+    &gt;&gt;&gt; headers.add('Set-Cookie', 'foo=bar') 
+    &gt;&gt;&gt; headers.add('set-cookie', 'baz=quxx') 
+    &gt;&gt;&gt; headers['content-length'] = '7' 
+    &gt;&gt;&gt; headers['SET-cookie'] 
+    'foo=bar, baz=quxx' 
+    &gt;&gt;&gt; headers['Content-Length'] 
+    '7' 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">(</span><span class="s1">HTTPHeaderDict</span><span class="s2">, </span><span class="s1">self</span><span class="s2">).</span><span class="s1">__init__</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_container </span><span class="s2">= </span><span class="s1">OrderedDict</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">headers </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s1">HTTPHeaderDict</span><span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_copy_from</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">kwargs</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">val</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()] = [</span><span class="s1">key</span><span class="s2">, </span><span class="s1">val</span><span class="s2">]</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s1">val </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+        <span class="s0">return </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">val</span><span class="s2">[</span><span class="s6">1</span><span class="s2">:])</span>
+
+    <span class="s0">def </span><span class="s1">__delitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+
+    <span class="s0">def </span><span class="s1">__contains__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">() </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span>
+
+    <span class="s0">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">Mapping</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s4">&quot;keys&quot;</span><span class="s2">):</span>
+            <span class="s0">return False</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)):</span>
+            <span class="s1">other </span><span class="s2">= </span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">dict</span><span class="s2">((</span><span class="s1">k</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">(), </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">itermerged</span><span class="s2">()) == </span><span class="s1">dict</span><span class="s2">(</span>
+            <span class="s2">(</span><span class="s1">k</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">(), </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">other</span><span class="s2">.</span><span class="s1">itermerged</span><span class="s2">()</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">return not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">six</span><span class="s2">.</span><span class="s1">PY2</span><span class="s2">:  </span><span class="s3"># Python 2</span>
+        <span class="s1">iterkeys </span><span class="s2">= </span><span class="s1">MutableMapping</span><span class="s2">.</span><span class="s1">iterkeys</span>
+        <span class="s1">itervalues </span><span class="s2">= </span><span class="s1">MutableMapping</span><span class="s2">.</span><span class="s1">itervalues</span>
+
+    <span class="s1">__marker </span><span class="s2">= </span><span class="s1">object</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__iter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># Only provide the originally cased names</span>
+        <span class="s0">for </span><span class="s1">vals </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">values</span><span class="s2">():</span>
+            <span class="s0">yield </span><span class="s1">vals</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">pop</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s1">__marker</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;D.pop(k[,d]) -&gt; v, remove specified key and return the corresponding value. 
+        If key is not found, d is returned if given, otherwise KeyError is raised. 
+        &quot;&quot;&quot;</span>
+        <span class="s3"># Using the MutableMapping function directly fails due to the private marker.</span>
+        <span class="s3"># Using ordinary dict.pop would expose the internal structures.</span>
+        <span class="s3"># So let's reinvent the wheel.</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">value </span><span class="s2">= </span><span class="s1">self</span><span class="s2">[</span><span class="s1">key</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">KeyError</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">default </span><span class="s0">is </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__marker</span><span class="s2">:</span>
+                <span class="s0">raise</span>
+            <span class="s0">return </span><span class="s1">default</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">del </span><span class="s1">self</span><span class="s2">[</span><span class="s1">key</span><span class="s2">]</span>
+            <span class="s0">return </span><span class="s1">value</span>
+
+    <span class="s0">def </span><span class="s1">discard</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">del </span><span class="s1">self</span><span class="s2">[</span><span class="s1">key</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">KeyError</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">add</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">val</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Adds a (name, value) pair, doesn't overwrite the value if it already 
+        exists. 
+ 
+        &gt;&gt;&gt; headers = HTTPHeaderDict(foo='bar') 
+        &gt;&gt;&gt; headers.add('Foo', 'baz') 
+        &gt;&gt;&gt; headers['foo'] 
+        'bar, baz' 
+        &quot;&quot;&quot;</span>
+        <span class="s1">key_lower </span><span class="s2">= </span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()</span>
+        <span class="s1">new_vals </span><span class="s2">= [</span><span class="s1">key</span><span class="s2">, </span><span class="s1">val</span><span class="s2">]</span>
+        <span class="s3"># Keep the common case aka no item present as fast as possible</span>
+        <span class="s1">vals </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">.</span><span class="s1">setdefault</span><span class="s2">(</span><span class="s1">key_lower</span><span class="s2">, </span><span class="s1">new_vals</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">new_vals </span><span class="s0">is not </span><span class="s1">vals</span><span class="s2">:</span>
+            <span class="s1">vals</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">val</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">extend</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Generic import function for any type of header-like object. 
+        Adapted version of MutableMapping.update in order to insert items 
+        with self.add instead of self.__setitem__ 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">args</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s4">&quot;extend() takes at most 1 positional &quot;</span>
+                <span class="s4">&quot;arguments ({0} given)&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">args</span><span class="s2">))</span>
+            <span class="s2">)</span>
+        <span class="s1">other </span><span class="s2">= </span><span class="s1">args</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] </span><span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">args</span><span class="s2">) &gt;= </span><span class="s6">1 </span><span class="s0">else </span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">HTTPHeaderDict</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">val </span><span class="s0">in </span><span class="s1">other</span><span class="s2">.</span><span class="s1">iteritems</span><span class="s2">():</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">val</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">Mapping</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">other</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">other</span><span class="s2">[</span><span class="s1">key</span><span class="s2">])</span>
+        <span class="s0">elif </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s4">&quot;keys&quot;</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">other</span><span class="s2">.</span><span class="s1">keys</span><span class="s2">():</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">other</span><span class="s2">[</span><span class="s1">key</span><span class="s2">])</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">other</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">value</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">getlist</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s1">__marker</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Returns a list of all the values for the named field. Returns an 
+        empty list if the key doesn't exist.&quot;&quot;&quot;</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">vals </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+        <span class="s0">except </span><span class="s1">KeyError</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">default </span><span class="s0">is </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__marker</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s2">[]</span>
+            <span class="s0">return </span><span class="s1">default</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">vals</span><span class="s2">[</span><span class="s6">1</span><span class="s2">:]</span>
+
+    <span class="s0">def </span><span class="s1">_prepare_for_method_change</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Remove content-specific header fields before changing the request 
+        method to GET or HEAD according to RFC 9110, Section 15.4. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">content_specific_headers </span><span class="s2">= [</span>
+            <span class="s4">&quot;Content-Encoding&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Content-Language&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Content-Location&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Content-Type&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Content-Length&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Digest&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;Last-Modified&quot;</span><span class="s2">,</span>
+        <span class="s2">]</span>
+        <span class="s0">for </span><span class="s1">header </span><span class="s0">in </span><span class="s1">content_specific_headers</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">discard</span><span class="s2">(</span><span class="s1">header</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s3"># Backwards compatibility for httplib</span>
+    <span class="s1">getheaders </span><span class="s2">= </span><span class="s1">getlist</span>
+    <span class="s1">getallmatchingheaders </span><span class="s2">= </span><span class="s1">getlist</span>
+    <span class="s1">iget </span><span class="s2">= </span><span class="s1">getlist</span>
+
+    <span class="s3"># Backwards compatibility for http.cookiejar</span>
+    <span class="s1">get_all </span><span class="s2">= </span><span class="s1">getlist</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s4">&quot;%s(%s)&quot; </span><span class="s2">% (</span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">).</span><span class="s1">__name__</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">itermerged</span><span class="s2">()))</span>
+
+    <span class="s0">def </span><span class="s1">_copy_from</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">other</span><span class="s2">:</span>
+            <span class="s1">val </span><span class="s2">= </span><span class="s1">other</span><span class="s2">.</span><span class="s1">getlist</span><span class="s2">(</span><span class="s1">key</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">val</span><span class="s2">, </span><span class="s1">list</span><span class="s2">):</span>
+                <span class="s3"># Don't need to convert tuples</span>
+                <span class="s1">val </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">val</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()] = [</span><span class="s1">key</span><span class="s2">] + </span><span class="s1">val</span>
+
+    <span class="s0">def </span><span class="s1">copy</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">clone </span><span class="s2">= </span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)()</span>
+        <span class="s1">clone</span><span class="s2">.</span><span class="s1">_copy_from</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">clone</span>
+
+    <span class="s0">def </span><span class="s1">iteritems</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Iterate over all header lines, including duplicate ones.&quot;&quot;&quot;</span>
+        <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self</span><span class="s2">:</span>
+            <span class="s1">vals </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+            <span class="s0">for </span><span class="s1">val </span><span class="s0">in </span><span class="s1">vals</span><span class="s2">[</span><span class="s6">1</span><span class="s2">:]:</span>
+                <span class="s0">yield </span><span class="s1">vals</span><span class="s2">[</span><span class="s6">0</span><span class="s2">], </span><span class="s1">val</span>
+
+    <span class="s0">def </span><span class="s1">itermerged</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Iterate over all headers, merging duplicate ones together.&quot;&quot;&quot;</span>
+        <span class="s0">for </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self</span><span class="s2">:</span>
+            <span class="s1">val </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_container</span><span class="s2">[</span><span class="s1">key</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">()]</span>
+            <span class="s0">yield </span><span class="s1">val</span><span class="s2">[</span><span class="s6">0</span><span class="s2">], </span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">val</span><span class="s2">[</span><span class="s6">1</span><span class="s2">:])</span>
+
+    <span class="s0">def </span><span class="s1">items</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">iteritems</span><span class="s2">())</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">from_httplib</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">message</span><span class="s2">):  </span><span class="s3"># Python 2</span>
+        <span class="s5">&quot;&quot;&quot;Read headers from a Python 2 httplib message object.&quot;&quot;&quot;</span>
+        <span class="s3"># python2.7 does not expose a proper API for exporting multiheaders</span>
+        <span class="s3"># efficiently. This function re-reads raw lines from the message</span>
+        <span class="s3"># object and extracts the multiheaders properly.</span>
+        <span class="s1">obs_fold_continued_leaders </span><span class="s2">= (</span><span class="s4">&quot; &quot;</span><span class="s2">, </span><span class="s4">&quot;</span><span class="s0">\t</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s1">headers </span><span class="s2">= []</span>
+
+        <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">message</span><span class="s2">.</span><span class="s1">headers</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">obs_fold_continued_leaders</span><span class="s2">):</span>
+                <span class="s0">if not </span><span class="s1">headers</span><span class="s2">:</span>
+                    <span class="s3"># We received a header line that starts with OWS as described</span>
+                    <span class="s3"># in RFC-7230 S3.2.4. This indicates a multiline header, but</span>
+                    <span class="s3"># there exists no previous header to which we can attach it.</span>
+                    <span class="s0">raise </span><span class="s1">InvalidHeader</span><span class="s2">(</span>
+                        <span class="s4">&quot;Header continuation with no previous header: %s&quot; </span><span class="s2">% </span><span class="s1">line</span>
+                    <span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s2">= </span><span class="s1">headers</span><span class="s2">[-</span><span class="s6">1</span><span class="s2">]</span>
+                    <span class="s1">headers</span><span class="s2">[-</span><span class="s6">1</span><span class="s2">] = (</span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s2">+ </span><span class="s4">&quot; &quot; </span><span class="s2">+ </span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">())</span>
+                    <span class="s0">continue</span>
+
+            <span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">&quot;:&quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">)</span>
+            <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">key</span><span class="s2">, </span><span class="s1">value</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()))</span>
+
+        <span class="s0">return </span><span class="s1">cls</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

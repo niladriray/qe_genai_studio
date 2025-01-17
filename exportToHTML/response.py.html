@@ -1,0 +1,130 @@
+<html>
+<head>
+<title>response.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+response.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">from </span><span class="s1">email</span><span class="s2">.</span><span class="s1">errors </span><span class="s0">import </span><span class="s1">MultipartInvariantViolationDefect</span><span class="s2">, </span><span class="s1">StartBoundaryNotFoundDefect</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">exceptions </span><span class="s0">import </span><span class="s1">HeaderParsingError</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">packages</span><span class="s2">.</span><span class="s1">six</span><span class="s2">.</span><span class="s1">moves </span><span class="s0">import </span><span class="s1">http_client </span><span class="s0">as </span><span class="s1">httplib</span>
+
+
+<span class="s0">def </span><span class="s1">is_fp_closed</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Checks whether a given file-like object is closed. 
+ 
+    :param obj: 
+        The file-like object to check. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s4"># Check `isclosed()` first, in case Python3 doesn't set `closed`.</span>
+        <span class="s4"># GH Issue #928</span>
+        <span class="s0">return </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">isclosed</span><span class="s2">()</span>
+    <span class="s0">except </span><span class="s1">AttributeError</span><span class="s2">:</span>
+        <span class="s0">pass</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s4"># Check via the official file-like-object way.</span>
+        <span class="s0">return </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">closed</span>
+    <span class="s0">except </span><span class="s1">AttributeError</span><span class="s2">:</span>
+        <span class="s0">pass</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s4"># Check if the object is a container for another file-like object that</span>
+        <span class="s4"># gets released on exhaustion (e.g. HTTPResponse).</span>
+        <span class="s0">return </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">fp </span><span class="s0">is None</span>
+    <span class="s0">except </span><span class="s1">AttributeError</span><span class="s2">:</span>
+        <span class="s0">pass</span>
+
+    <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s5">&quot;Unable to determine whether fp is closed.&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">assert_header_parsing</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Asserts whether all headers have been successfully parsed. 
+    Extracts encountered errors from the result of parsing headers. 
+ 
+    Only works on Python 3. 
+ 
+    :param http.client.HTTPMessage headers: Headers to verify. 
+ 
+    :raises urllib3.exceptions.HeaderParsingError: 
+        If parsing errors are found. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s4"># This will fail silently if we pass in the wrong kind of parameter.</span>
+    <span class="s4"># To make debugging easier add an explicit check.</span>
+    <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s1">httplib</span><span class="s2">.</span><span class="s1">HTTPMessage</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s5">&quot;expected httplib.Message, got {0}.&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">)))</span>
+
+    <span class="s1">defects </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s5">&quot;defects&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">get_payload </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s5">&quot;get_payload&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s1">unparsed_data </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">if </span><span class="s1">get_payload</span><span class="s2">:</span>
+        <span class="s4"># get_payload is actually email.message.Message.get_payload;</span>
+        <span class="s4"># we're only interested in the result if it's not a multipart message</span>
+        <span class="s0">if not </span><span class="s1">headers</span><span class="s2">.</span><span class="s1">is_multipart</span><span class="s2">():</span>
+            <span class="s1">payload </span><span class="s2">= </span><span class="s1">get_payload</span><span class="s2">()</span>
+
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">payload</span><span class="s2">, (</span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">str</span><span class="s2">)):</span>
+                <span class="s1">unparsed_data </span><span class="s2">= </span><span class="s1">payload</span>
+    <span class="s0">if </span><span class="s1">defects</span><span class="s2">:</span>
+        <span class="s4"># httplib is assuming a response body is available</span>
+        <span class="s4"># when parsing headers even when httplib only sends</span>
+        <span class="s4"># header data to parse_headers() This results in</span>
+        <span class="s4"># defects on multipart responses in particular.</span>
+        <span class="s4"># See: https://github.com/urllib3/urllib3/issues/800</span>
+
+        <span class="s4"># So we ignore the following defects:</span>
+        <span class="s4"># - StartBoundaryNotFoundDefect:</span>
+        <span class="s4">#     The claimed start boundary was never found.</span>
+        <span class="s4"># - MultipartInvariantViolationDefect:</span>
+        <span class="s4">#     A message claimed to be a multipart but no subparts were found.</span>
+        <span class="s1">defects </span><span class="s2">= [</span>
+            <span class="s1">defect</span>
+            <span class="s0">for </span><span class="s1">defect </span><span class="s0">in </span><span class="s1">defects</span>
+            <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span>
+                <span class="s1">defect</span><span class="s2">, (</span><span class="s1">StartBoundaryNotFoundDefect</span><span class="s2">, </span><span class="s1">MultipartInvariantViolationDefect</span><span class="s2">)</span>
+            <span class="s2">)</span>
+        <span class="s2">]</span>
+
+    <span class="s0">if </span><span class="s1">defects </span><span class="s0">or </span><span class="s1">unparsed_data</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">HeaderParsingError</span><span class="s2">(</span><span class="s1">defects</span><span class="s2">=</span><span class="s1">defects</span><span class="s2">, </span><span class="s1">unparsed_data</span><span class="s2">=</span><span class="s1">unparsed_data</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">is_response_to_head</span><span class="s2">(</span><span class="s1">response</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Checks whether the request of a response has been a HEAD-request. 
+    Handles the quirks of AppEngine. 
+ 
+    :param http.client.HTTPResponse response: 
+        Response to check if the originating request 
+        used 'HEAD' as a method. 
+    &quot;&quot;&quot;</span>
+    <span class="s4"># FIXME: Can we do this somehow without accessing private httplib _method?</span>
+    <span class="s1">method </span><span class="s2">= </span><span class="s1">response</span><span class="s2">.</span><span class="s1">_method</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">method</span><span class="s2">, </span><span class="s1">int</span><span class="s2">):  </span><span class="s4"># Platform-specific: Appengine</span>
+        <span class="s0">return </span><span class="s1">method </span><span class="s2">== </span><span class="s6">3</span>
+    <span class="s0">return </span><span class="s1">method</span><span class="s2">.</span><span class="s1">upper</span><span class="s2">() == </span><span class="s5">&quot;HEAD&quot;</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,954 @@
+<html>
+<head>
+<title>jsonpatch.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+jsonpatch.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># python-json-patch - An implementation of the JSON Patch format</span>
+<span class="s0"># https://github.com/stefankoegl/python-json-patch</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (c) 2011 Stefan Kögl &lt;stefan@skoegl.net&gt;</span>
+<span class="s0"># All rights reserved.</span>
+<span class="s0">#</span>
+<span class="s0"># Redistribution and use in source and binary forms, with or without</span>
+<span class="s0"># modification, are permitted provided that the following conditions</span>
+<span class="s0"># are met:</span>
+<span class="s0">#</span>
+<span class="s0"># 1. Redistributions of source code must retain the above copyright</span>
+<span class="s0">#    notice, this list of conditions and the following disclaimer.</span>
+<span class="s0"># 2. Redistributions in binary form must reproduce the above copyright</span>
+<span class="s0">#    notice, this list of conditions and the following disclaimer in the</span>
+<span class="s0">#    documentation and/or other materials provided with the distribution.</span>
+<span class="s0"># 3. The name of the author may not be used to endorse or promote products</span>
+<span class="s0">#    derived from this software without specific prior written permission.</span>
+<span class="s0">#</span>
+<span class="s0"># THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR</span>
+<span class="s0"># IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES</span>
+<span class="s0"># OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.</span>
+<span class="s0"># IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,</span>
+<span class="s0"># INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT</span>
+<span class="s0"># NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,</span>
+<span class="s0"># DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY</span>
+<span class="s0"># THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT</span>
+<span class="s0"># (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF</span>
+<span class="s0"># THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</span>
+<span class="s0">#</span>
+
+<span class="s2">&quot;&quot;&quot; Apply JSON-Patches (RFC 6902) &quot;&quot;&quot;</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">unicode_literals</span>
+
+<span class="s3">import </span><span class="s1">collections</span>
+<span class="s3">import </span><span class="s1">copy</span>
+<span class="s3">import </span><span class="s1">functools</span>
+<span class="s3">import </span><span class="s1">json</span>
+<span class="s3">import </span><span class="s1">sys</span>
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc </span><span class="s3">import </span><span class="s1">Sequence</span>
+<span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:  </span><span class="s0"># Python 3</span>
+    <span class="s3">from </span><span class="s1">collections </span><span class="s3">import </span><span class="s1">Sequence</span>
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">types </span><span class="s3">import </span><span class="s1">MappingProxyType</span>
+<span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+    <span class="s0"># Python &lt; 3.3</span>
+    <span class="s1">MappingProxyType </span><span class="s4">= </span><span class="s1">dict</span>
+
+<span class="s3">from </span><span class="s1">jsonpointer </span><span class="s3">import </span><span class="s1">JsonPointer</span><span class="s4">, </span><span class="s1">JsonPointerException</span>
+
+
+<span class="s1">_ST_ADD </span><span class="s4">= </span><span class="s5">0</span>
+<span class="s1">_ST_REMOVE </span><span class="s4">= </span><span class="s5">1</span>
+
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc </span><span class="s3">import </span><span class="s1">MutableMapping</span><span class="s4">, </span><span class="s1">MutableSequence</span>
+
+<span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">collections </span><span class="s3">import </span><span class="s1">MutableMapping</span><span class="s4">, </span><span class="s1">MutableSequence</span>
+    <span class="s1">str </span><span class="s4">= </span><span class="s1">unicode</span>
+
+<span class="s0"># Will be parsed by setup.py to determine package metadata</span>
+<span class="s1">__author__ </span><span class="s4">= </span><span class="s6">'Stefan Kögl &lt;stefan@skoegl.net&gt;'</span>
+<span class="s1">__version__ </span><span class="s4">= </span><span class="s6">'1.33'</span>
+<span class="s1">__website__ </span><span class="s4">= </span><span class="s6">'https://github.com/stefankoegl/python-json-patch'</span>
+<span class="s1">__license__ </span><span class="s4">= </span><span class="s6">'Modified BSD License'</span>
+
+
+<span class="s0"># pylint: disable=E0611,W0404</span>
+<span class="s3">if </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info </span><span class="s4">&gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">0</span><span class="s4">):</span>
+    <span class="s1">basestring </span><span class="s4">= (</span><span class="s1">bytes</span><span class="s4">, </span><span class="s1">str</span><span class="s4">)  </span><span class="s0"># pylint: disable=C0103,W0622</span>
+
+
+<span class="s3">class </span><span class="s1">JsonPatchException</span><span class="s4">(</span><span class="s1">Exception</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Base Json Patch exception&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s1">JsonPatchException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; Raised if an invalid JSON Patch is created &quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s1">JsonPatchException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Raised if patch could not be applied due to conflict situation such as: 
+    - attempt to add object key when it already exists; 
+    - attempt to operate with nonexistence object key; 
+    - attempt to insert value to array at position beyond its size; 
+    - etc. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">JsonPatchTestFailed</span><span class="s4">(</span><span class="s1">JsonPatchException</span><span class="s4">, </span><span class="s1">AssertionError</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; A Test operation failed &quot;&quot;&quot;</span>
+
+
+<span class="s3">def </span><span class="s1">multidict</span><span class="s4">(</span><span class="s1">ordered_pairs</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Convert duplicate keys values to lists.&quot;&quot;&quot;</span>
+    <span class="s0"># read all values into lists</span>
+    <span class="s1">mdict </span><span class="s4">= </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">defaultdict</span><span class="s4">(</span><span class="s1">list</span><span class="s4">)</span>
+    <span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value </span><span class="s3">in </span><span class="s1">ordered_pairs</span><span class="s4">:</span>
+        <span class="s1">mdict</span><span class="s4">[</span><span class="s1">key</span><span class="s4">].</span><span class="s1">append</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">return </span><span class="s1">dict</span><span class="s4">(</span>
+        <span class="s0"># unpack lists that have only 1 item</span>
+        <span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">values</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] </span><span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">values</span><span class="s4">) == </span><span class="s5">1 </span><span class="s3">else </span><span class="s1">values</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">values </span><span class="s3">in </span><span class="s1">mdict</span><span class="s4">.</span><span class="s1">items</span><span class="s4">()</span>
+    <span class="s4">)</span>
+
+
+<span class="s0"># The &quot;object_pairs_hook&quot; parameter is used to handle duplicate keys when</span>
+<span class="s0"># loading a JSON object.</span>
+<span class="s1">_jsonloads </span><span class="s4">= </span><span class="s1">functools</span><span class="s4">.</span><span class="s1">partial</span><span class="s4">(</span><span class="s1">json</span><span class="s4">.</span><span class="s1">loads</span><span class="s4">, </span><span class="s1">object_pairs_hook</span><span class="s4">=</span><span class="s1">multidict</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">apply_patch</span><span class="s4">(</span><span class="s1">doc</span><span class="s4">, </span><span class="s1">patch</span><span class="s4">, </span><span class="s1">in_place</span><span class="s4">=</span><span class="s3">False</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Apply list of patches to specified json document. 
+ 
+    :param doc: Document object. 
+    :type doc: dict 
+ 
+    :param patch: JSON patch as list of dicts or raw JSON-encoded string. 
+    :type patch: list or str 
+ 
+    :param in_place: While :const:`True` patch will modify target document. 
+                     By default patch will be applied to document copy. 
+    :type in_place: bool 
+ 
+    :param pointer_cls: JSON pointer class to use. 
+    :type pointer_cls: Type[JsonPointer] 
+ 
+    :return: Patched document object. 
+    :rtype: dict 
+ 
+    &gt;&gt;&gt; doc = {'foo': 'bar'} 
+    &gt;&gt;&gt; patch = [{'op': 'add', 'path': '/baz', 'value': 'qux'}] 
+    &gt;&gt;&gt; other = apply_patch(doc, patch) 
+    &gt;&gt;&gt; doc is not other 
+    True 
+    &gt;&gt;&gt; other == {'foo': 'bar', 'baz': 'qux'} 
+    True 
+    &gt;&gt;&gt; patch = [{'op': 'add', 'path': '/baz', 'value': 'qux'}] 
+    &gt;&gt;&gt; apply_patch(doc, patch, in_place=True) == {'foo': 'bar', 'baz': 'qux'} 
+    True 
+    &gt;&gt;&gt; doc == other 
+    True 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">patch</span><span class="s4">, </span><span class="s1">basestring</span><span class="s4">):</span>
+        <span class="s1">patch </span><span class="s4">= </span><span class="s1">JsonPatch</span><span class="s4">.</span><span class="s1">from_string</span><span class="s4">(</span><span class="s1">patch</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">patch </span><span class="s4">= </span><span class="s1">JsonPatch</span><span class="s4">(</span><span class="s1">patch</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">patch</span><span class="s4">.</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">doc</span><span class="s4">, </span><span class="s1">in_place</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">make_patch</span><span class="s4">(</span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Generates patch by comparing two document objects. Actually is 
+    a proxy to :meth:`JsonPatch.from_diff` method. 
+ 
+    :param src: Data source document object. 
+    :type src: dict 
+ 
+    :param dst: Data source document object. 
+    :type dst: dict 
+ 
+    :param pointer_cls: JSON pointer class to use. 
+    :type pointer_cls: Type[JsonPointer] 
+ 
+    &gt;&gt;&gt; src = {'foo': 'bar', 'numbers': [1, 3, 4, 8]} 
+    &gt;&gt;&gt; dst = {'baz': 'qux', 'numbers': [1, 4, 7]} 
+    &gt;&gt;&gt; patch = make_patch(src, dst) 
+    &gt;&gt;&gt; new = patch.apply(src) 
+    &gt;&gt;&gt; new == dst 
+    True 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">return </span><span class="s1">JsonPatch</span><span class="s4">.</span><span class="s1">from_diff</span><span class="s4">(</span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">PatchOperation</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;A single operation inside a JSON Patch.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">operation</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls </span><span class="s4">= </span><span class="s1">pointer_cls</span>
+
+        <span class="s3">if not </span><span class="s1">operation</span><span class="s4">.</span><span class="s1">__contains__</span><span class="s4">(</span><span class="s6">'path'</span><span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Operation must have a 'path' member&quot;</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'path'</span><span class="s4">], </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">):</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">location </span><span class="s4">= </span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'path'</span><span class="s4">].</span><span class="s1">path</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer </span><span class="s4">= </span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'path'</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">location </span><span class="s4">= </span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'path'</span><span class="s4">]</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span><span class="s4">)</span>
+            <span class="s3">except </span><span class="s1">TypeError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Invalid 'path'&quot;</span><span class="s4">)</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">operation </span><span class="s4">= </span><span class="s1">operation</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Abstract method that applies a patch operation to the specified object.&quot;&quot;&quot;</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s6">'should implement the patch operation.'</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__hash__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">hash</span><span class="s4">(</span><span class="s1">frozenset</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">.</span><span class="s1">items</span><span class="s4">()))</span>
+
+    <span class="s3">def </span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">other</span><span class="s4">, </span><span class="s1">PatchOperation</span><span class="s4">):</span>
+            <span class="s3">return False</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation </span><span class="s4">== </span><span class="s1">other</span><span class="s4">.</span><span class="s1">operation</span>
+
+    <span class="s3">def </span><span class="s1">__ne__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return not</span><span class="s4">(</span><span class="s1">self </span><span class="s4">== </span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">path</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s6">'/'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[:-</span><span class="s5">1</span><span class="s4">])</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">int</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">])</span>
+        <span class="s3">except </span><span class="s1">ValueError</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s4">@</span><span class="s1">key</span><span class="s4">.</span><span class="s1">setter</span>
+    <span class="s3">def </span><span class="s1">key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">] = </span><span class="s1">str</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">location </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">path</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'path'</span><span class="s4">] = </span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span>
+
+
+<span class="s3">class </span><span class="s1">RemoveOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Removes an object property or an array element.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">Sequence</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">part</span><span class="s4">, </span><span class="s1">int</span><span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">JsonPointerException</span><span class="s4">(</span><span class="s6">&quot;invalid array index '{0}'&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">part</span><span class="s4">))</span>
+
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">del </span><span class="s1">subobj</span><span class="s4">[</span><span class="s1">part</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">KeyError</span><span class="s4">, </span><span class="s1">IndexError</span><span class="s4">) </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s1">msg </span><span class="s4">= </span><span class="s6">&quot;can't remove a non-existent object '{0}'&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">part</span><span class="s4">)</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt;= </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+
+<span class="s3">class </span><span class="s1">AddOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Adds an object property or an array element.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">&quot;value&quot;</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s1">KeyError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span>
+                <span class="s6">&quot;The operation does not contain a 'value' member&quot;</span><span class="s4">)</span>
+
+        <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s4">== </span><span class="s6">'-'</span><span class="s4">:</span>
+                <span class="s1">subobj</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)  </span><span class="s0"># pylint: disable=E1103</span>
+
+            <span class="s3">elif </span><span class="s1">part </span><span class="s4">&gt; </span><span class="s1">len</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">) </span><span class="s3">or </span><span class="s1">part </span><span class="s4">&lt; </span><span class="s5">0</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s6">&quot;can't insert outside of list&quot;</span><span class="s4">)</span>
+
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">subobj</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">part</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)  </span><span class="s0"># pylint: disable=E1103</span>
+
+        <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">obj </span><span class="s4">= </span><span class="s1">value  </span><span class="s0"># we're replacing the root</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">subobj</span><span class="s4">[</span><span class="s1">part</span><span class="s4">] = </span><span class="s1">value</span>
+
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s6">&quot;invalid document type {0}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">type</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">)))</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s6">&quot;unable to fully resolve json pointer {0}, part {1}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span><span class="s4">, </span><span class="s1">part</span><span class="s4">))</span>
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+
+<span class="s3">class </span><span class="s1">ReplaceOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Replaces an object property or an array element by a new value.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">&quot;value&quot;</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s1">KeyError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span>
+                <span class="s6">&quot;The operation does not contain a 'value' member&quot;</span><span class="s4">)</span>
+
+        <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">part </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">value</span>
+
+        <span class="s3">if </span><span class="s1">part </span><span class="s4">== </span><span class="s6">&quot;-&quot;</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;'path' with '-' can't be applied to 'replace' operation&quot;</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s4">&gt;= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">) </span><span class="s3">or </span><span class="s1">part </span><span class="s4">&lt; </span><span class="s5">0</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s6">&quot;can't replace outside of list&quot;</span><span class="s4">)</span>
+
+        <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s3">not in </span><span class="s1">subobj</span><span class="s4">:</span>
+                <span class="s1">msg </span><span class="s4">= </span><span class="s6">&quot;can't replace a non-existent object '{0}'&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">part</span><span class="s4">)</span>
+                <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s6">&quot;invalid document type {0}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">type</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">)))</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s6">&quot;unable to fully resolve json pointer {0}, part {1}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span><span class="s4">, </span><span class="s1">part</span><span class="s4">))</span>
+
+        <span class="s1">subobj</span><span class="s4">[</span><span class="s1">part</span><span class="s4">] = </span><span class="s1">value</span>
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+
+<span class="s3">class </span><span class="s1">MoveOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Moves an object property or an array element to a new location.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">], </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">):</span>
+                <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">])</span>
+        <span class="s3">except </span><span class="s1">KeyError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span>
+                <span class="s6">&quot;The operation does not contain a 'from' member&quot;</span><span class="s4">)</span>
+
+        <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">subobj</span><span class="s4">[</span><span class="s1">part</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">KeyError</span><span class="s4">, </span><span class="s1">IndexError</span><span class="s4">) </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">ex</span><span class="s4">))</span>
+
+        <span class="s0"># If source and target are equal, this is a no-op</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer </span><span class="s4">== </span><span class="s1">from_ptr</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">obj</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">) </span><span class="s3">and </span><span class="s1">\</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">contains</span><span class="s4">(</span><span class="s1">from_ptr</span><span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s6">'Cannot move values into their own children'</span><span class="s4">)</span>
+
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">RemoveOperation</span><span class="s4">({</span>
+            <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'remove'</span><span class="s4">,</span>
+            <span class="s6">'path'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">]</span>
+        <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">).</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">AddOperation</span><span class="s4">({</span>
+            <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'add'</span><span class="s4">,</span>
+            <span class="s6">'path'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+            <span class="s6">'value'</span><span class="s4">: </span><span class="s1">value</span>
+        <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">).</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">from_path</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">])</span>
+        <span class="s3">return </span><span class="s6">'/'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[:-</span><span class="s5">1</span><span class="s4">])</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">from_key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">])</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">int</span><span class="s4">(</span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">])</span>
+        <span class="s3">except </span><span class="s1">TypeError</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s4">@</span><span class="s1">from_key</span><span class="s4">.</span><span class="s1">setter</span>
+    <span class="s3">def </span><span class="s1">from_key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">])</span>
+        <span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">parts</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">] = </span><span class="s1">str</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">] = </span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">path</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">from_path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">from_key </span><span class="s4">&gt;= </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">from_key </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+    <span class="s3">def </span><span class="s1">_on_undo_add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">from_path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">from_key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">from_key </span><span class="s4">-= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">path </span><span class="s4">== </span><span class="s1">path</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">&gt; </span><span class="s1">key</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">-= </span><span class="s5">1</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">return </span><span class="s1">key</span>
+
+
+<span class="s3">class </span><span class="s1">TestOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Test value by specified location.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">part </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">val </span><span class="s4">= </span><span class="s1">subobj</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">val </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">walk</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">, </span><span class="s1">part</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s1">JsonPointerException </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchTestFailed</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">ex</span><span class="s4">))</span>
+
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'value'</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s1">KeyError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span>
+                <span class="s6">&quot;The operation does not contain a 'value' member&quot;</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">val </span><span class="s4">!= </span><span class="s1">value</span><span class="s4">:</span>
+            <span class="s1">msg </span><span class="s4">= </span><span class="s6">'{0} ({1}) is not equal to tested value {2} ({3})'</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchTestFailed</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">val</span><span class="s4">, </span><span class="s1">type</span><span class="s4">(</span><span class="s1">val</span><span class="s4">),</span>
+                                                 <span class="s1">value</span><span class="s4">, </span><span class="s1">type</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)))</span>
+
+        <span class="s3">return </span><span class="s1">obj</span>
+
+
+<span class="s3">class </span><span class="s1">CopyOperation</span><span class="s4">(</span><span class="s1">PatchOperation</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; Copies an object property or an array element to a new location &quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">from_ptr </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'from'</span><span class="s4">])</span>
+        <span class="s3">except </span><span class="s1">KeyError </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span>
+                <span class="s6">&quot;The operation does not contain a 'from' member&quot;</span><span class="s4">)</span>
+
+        <span class="s1">subobj</span><span class="s4">, </span><span class="s1">part </span><span class="s4">= </span><span class="s1">from_ptr</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">copy</span><span class="s4">.</span><span class="s1">deepcopy</span><span class="s4">(</span><span class="s1">subobj</span><span class="s4">[</span><span class="s1">part</span><span class="s4">])</span>
+        <span class="s3">except </span><span class="s4">(</span><span class="s1">KeyError</span><span class="s4">, </span><span class="s1">IndexError</span><span class="s4">) </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">JsonPatchConflict</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">ex</span><span class="s4">))</span>
+
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">AddOperation</span><span class="s4">({</span>
+            <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'add'</span><span class="s4">,</span>
+            <span class="s6">'path'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+            <span class="s6">'value'</span><span class="s4">: </span><span class="s1">value</span>
+        <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">).</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">obj</span>
+
+
+<span class="s3">class </span><span class="s1">JsonPatch</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s1">json_dumper </span><span class="s4">= </span><span class="s1">staticmethod</span><span class="s4">(</span><span class="s1">json</span><span class="s4">.</span><span class="s1">dumps</span><span class="s4">)</span>
+    <span class="s1">json_loader </span><span class="s4">= </span><span class="s1">staticmethod</span><span class="s4">(</span><span class="s1">_jsonloads</span><span class="s4">)</span>
+
+    <span class="s1">operations </span><span class="s4">= </span><span class="s1">MappingProxyType</span><span class="s4">({</span>
+        <span class="s6">'remove'</span><span class="s4">: </span><span class="s1">RemoveOperation</span><span class="s4">,</span>
+        <span class="s6">'add'</span><span class="s4">: </span><span class="s1">AddOperation</span><span class="s4">,</span>
+        <span class="s6">'replace'</span><span class="s4">: </span><span class="s1">ReplaceOperation</span><span class="s4">,</span>
+        <span class="s6">'move'</span><span class="s4">: </span><span class="s1">MoveOperation</span><span class="s4">,</span>
+        <span class="s6">'test'</span><span class="s4">: </span><span class="s1">TestOperation</span><span class="s4">,</span>
+        <span class="s6">'copy'</span><span class="s4">: </span><span class="s1">CopyOperation</span><span class="s4">,</span>
+    <span class="s4">})</span>
+
+    <span class="s6">&quot;&quot;&quot;A JSON Patch is a list of Patch Operations. 
+ 
+    &gt;&gt;&gt; patch = JsonPatch([ 
+    ...     {'op': 'add', 'path': '/foo', 'value': 'bar'}, 
+    ...     {'op': 'add', 'path': '/baz', 'value': [1, 2, 3]}, 
+    ...     {'op': 'remove', 'path': '/baz/1'}, 
+    ...     {'op': 'test', 'path': '/baz', 'value': [1, 3]}, 
+    ...     {'op': 'replace', 'path': '/baz/0', 'value': 42}, 
+    ...     {'op': 'remove', 'path': '/baz/1'}, 
+    ... ]) 
+    &gt;&gt;&gt; doc = {} 
+    &gt;&gt;&gt; result = patch.apply(doc) 
+    &gt;&gt;&gt; expected = {'foo': 'bar', 'baz': [42]} 
+    &gt;&gt;&gt; result == expected 
+    True 
+ 
+    JsonPatch object is iterable, so you can easily access each patch 
+    statement in a loop: 
+ 
+    &gt;&gt;&gt; lpatch = list(patch) 
+    &gt;&gt;&gt; expected = {'op': 'add', 'path': '/foo', 'value': 'bar'} 
+    &gt;&gt;&gt; lpatch[0] == expected 
+    True 
+    &gt;&gt;&gt; lpatch == patch.patch 
+    True 
+ 
+    Also JsonPatch could be converted directly to :class:`bool` if it contains 
+    any operation statements: 
+ 
+    &gt;&gt;&gt; bool(patch) 
+    True 
+    &gt;&gt;&gt; bool(JsonPatch([])) 
+    False 
+ 
+    This behavior is very handy with :func:`make_patch` to write more readable 
+    code: 
+ 
+    &gt;&gt;&gt; old = {'foo': 'bar', 'numbers': [1, 3, 4, 8]} 
+    &gt;&gt;&gt; new = {'baz': 'qux', 'numbers': [1, 4, 7]} 
+    &gt;&gt;&gt; patch = make_patch(old, new) 
+    &gt;&gt;&gt; if patch: 
+    ...     # document have changed, do something useful 
+    ...     patch.apply(old)    #doctest: +ELLIPSIS 
+    {...} 
+    &quot;&quot;&quot;</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">patch</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">patch </span><span class="s4">= </span><span class="s1">patch</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls </span><span class="s4">= </span><span class="s1">pointer_cls</span>
+
+        <span class="s0"># Verify that the structure of the patch document</span>
+        <span class="s0"># is correct by retrieving each patch element.</span>
+        <span class="s0"># Much of the validation is done in the initializer</span>
+        <span class="s0"># though some is delayed until the patch is applied.</span>
+        <span class="s3">for </span><span class="s1">op </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">patch</span><span class="s4">:</span>
+            <span class="s0"># We're only checking for basestring in the following check</span>
+            <span class="s0"># for two reasons:</span>
+            <span class="s0">#</span>
+            <span class="s0"># - It should come from JSON, which only allows strings as</span>
+            <span class="s0">#   dictionary keys, so having a string here unambiguously means</span>
+            <span class="s0">#   someone used: {&quot;op&quot;: ..., ...} instead of [{&quot;op&quot;: ..., ...}].</span>
+            <span class="s0">#</span>
+            <span class="s0"># - There's no possible false positive: if someone give a sequence</span>
+            <span class="s0">#   of mappings, this won't raise.</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">op</span><span class="s4">, </span><span class="s1">basestring</span><span class="s4">):</span>
+                <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Document is expected to be sequence of &quot;</span>
+                                       <span class="s6">&quot;operations, got a sequence of strings.&quot;</span><span class="s4">)</span>
+
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_get_operation</span><span class="s4">(</span><span class="s1">op</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__str__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;str(self) -&gt; self.to_string()&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">to_string</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">__bool__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">bool</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">patch</span><span class="s4">)</span>
+
+    <span class="s1">__nonzero__ </span><span class="s4">= </span><span class="s1">__bool__</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">iter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">patch</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__hash__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">hash</span><span class="s4">(</span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_ops</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">other</span><span class="s4">, </span><span class="s1">JsonPatch</span><span class="s4">):</span>
+            <span class="s3">return False</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_ops </span><span class="s4">== </span><span class="s1">other</span><span class="s4">.</span><span class="s1">_ops</span>
+
+    <span class="s3">def </span><span class="s1">__ne__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return not</span><span class="s4">(</span><span class="s1">self </span><span class="s4">== </span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">classmethod</span>
+    <span class="s3">def </span><span class="s1">from_string</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">patch_str</span><span class="s4">, </span><span class="s1">loads</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Creates JsonPatch instance from string source. 
+ 
+        :param patch_str: JSON patch as raw string. 
+        :type patch_str: str 
+ 
+        :param loads: A function of one argument that loads a serialized 
+                      JSON string. 
+        :type loads: function 
+ 
+        :param pointer_cls: JSON pointer class to use. 
+        :type pointer_cls: Type[JsonPointer] 
+ 
+        :return: :class:`JsonPatch` instance. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">json_loader </span><span class="s4">= </span><span class="s1">loads </span><span class="s3">or </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">json_loader</span>
+        <span class="s1">patch </span><span class="s4">= </span><span class="s1">json_loader</span><span class="s4">(</span><span class="s1">patch_str</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">cls</span><span class="s4">(</span><span class="s1">patch</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">classmethod</span>
+    <span class="s3">def </span><span class="s1">from_diff</span><span class="s4">(</span>
+            <span class="s1">cls</span><span class="s4">, </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">, </span><span class="s1">optimization</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">dumps</span><span class="s4">=</span><span class="s3">None</span><span class="s4">,</span>
+            <span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">,</span>
+    <span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Creates JsonPatch instance based on comparison of two document 
+        objects. Json patch would be created for `src` argument against `dst` 
+        one. 
+ 
+        :param src: Data source document object. 
+        :type src: dict 
+ 
+        :param dst: Data source document object. 
+        :type dst: dict 
+ 
+        :param dumps: A function of one argument that produces a serialized 
+                      JSON string. 
+        :type dumps: function 
+ 
+        :param pointer_cls: JSON pointer class to use. 
+        :type pointer_cls: Type[JsonPointer] 
+ 
+        :return: :class:`JsonPatch` instance. 
+ 
+        &gt;&gt;&gt; src = {'foo': 'bar', 'numbers': [1, 3, 4, 8]} 
+        &gt;&gt;&gt; dst = {'baz': 'qux', 'numbers': [1, 4, 7]} 
+        &gt;&gt;&gt; patch = JsonPatch.from_diff(src, dst) 
+        &gt;&gt;&gt; new = patch.apply(src) 
+        &gt;&gt;&gt; new == dst 
+        True 
+        &quot;&quot;&quot;</span>
+        <span class="s1">json_dumper </span><span class="s4">= </span><span class="s1">dumps </span><span class="s3">or </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">json_dumper</span>
+        <span class="s1">builder </span><span class="s4">= </span><span class="s1">DiffBuilder</span><span class="s4">(</span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">, </span><span class="s1">json_dumper</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+        <span class="s1">builder</span><span class="s4">.</span><span class="s1">_compare_values</span><span class="s4">(</span><span class="s6">''</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">)</span>
+        <span class="s1">ops </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">builder</span><span class="s4">.</span><span class="s1">execute</span><span class="s4">())</span>
+        <span class="s3">return </span><span class="s1">cls</span><span class="s4">(</span><span class="s1">ops</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">to_string</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">dumps</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Returns patch set as JSON string.&quot;&quot;&quot;</span>
+        <span class="s1">json_dumper </span><span class="s4">= </span><span class="s1">dumps </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">json_dumper</span>
+        <span class="s3">return </span><span class="s1">json_dumper</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">patch</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">_ops</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">map</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_operation</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">patch</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">, </span><span class="s1">in_place</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Applies the patch to a given object. 
+ 
+        :param obj: Document object. 
+        :type obj: dict 
+ 
+        :param in_place: Tweaks the way how patch would be applied - directly to 
+                         specified `obj` or to its copy. 
+        :type in_place: bool 
+ 
+        :return: Modified `obj`. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">if not </span><span class="s1">in_place</span><span class="s4">:</span>
+            <span class="s1">obj </span><span class="s4">= </span><span class="s1">copy</span><span class="s4">.</span><span class="s1">deepcopy</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">operation </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_ops</span><span class="s4">:</span>
+            <span class="s1">obj </span><span class="s4">= </span><span class="s1">operation</span><span class="s4">.</span><span class="s1">apply</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">obj</span>
+
+    <span class="s3">def </span><span class="s1">_get_operation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">operation</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s6">'op' </span><span class="s3">not in </span><span class="s1">operation</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Operation does not contain 'op' member&quot;</span><span class="s4">)</span>
+
+        <span class="s1">op </span><span class="s4">= </span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'op'</span><span class="s4">]</span>
+
+        <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">op</span><span class="s4">, </span><span class="s1">basestring</span><span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Operation's op must be a string&quot;</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">op </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operations</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">InvalidJsonPatch</span><span class="s4">(</span><span class="s6">&quot;Unknown operation {0!r}&quot;</span><span class="s4">.</span><span class="s1">format</span><span class="s4">(</span><span class="s1">op</span><span class="s4">))</span>
+
+        <span class="s1">cls </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operations</span><span class="s4">[</span><span class="s1">op</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">cls</span><span class="s4">(</span><span class="s1">operation</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">DiffBuilder</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">src_doc</span><span class="s4">, </span><span class="s1">dst_doc</span><span class="s4">, </span><span class="s1">dumps</span><span class="s4">=</span><span class="s1">json</span><span class="s4">.</span><span class="s1">dumps</span><span class="s4">, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">JsonPointer</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">dumps </span><span class="s4">= </span><span class="s1">dumps</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls </span><span class="s4">= </span><span class="s1">pointer_cls</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage </span><span class="s4">= [{}, {}]</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage2 </span><span class="s4">= [[], []]</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">__root </span><span class="s4">= </span><span class="s1">root </span><span class="s4">= []</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">src_doc </span><span class="s4">= </span><span class="s1">src_doc</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">dst_doc </span><span class="s4">= </span><span class="s1">dst_doc</span>
+        <span class="s1">root</span><span class="s4">[:] = [</span><span class="s1">root</span><span class="s4">, </span><span class="s1">root</span><span class="s4">, </span><span class="s3">None</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">store_index</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">st</span><span class="s4">):</span>
+        <span class="s1">typed_key </span><span class="s4">= (</span><span class="s1">value</span><span class="s4">, </span><span class="s1">type</span><span class="s4">(</span><span class="s1">value</span><span class="s4">))</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">storage </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage</span><span class="s4">[</span><span class="s1">st</span><span class="s4">]</span>
+            <span class="s1">stored </span><span class="s4">= </span><span class="s1">storage</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">typed_key</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">stored </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">storage</span><span class="s4">[</span><span class="s1">typed_key</span><span class="s4">] = [</span><span class="s1">index</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">storage</span><span class="s4">[</span><span class="s1">typed_key</span><span class="s4">].</span><span class="s1">append</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+
+        <span class="s3">except </span><span class="s1">TypeError</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage2</span><span class="s4">[</span><span class="s1">st</span><span class="s4">].</span><span class="s1">append</span><span class="s4">((</span><span class="s1">typed_key</span><span class="s4">, </span><span class="s1">index</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">take_index</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">st</span><span class="s4">):</span>
+        <span class="s1">typed_key </span><span class="s4">= (</span><span class="s1">value</span><span class="s4">, </span><span class="s1">type</span><span class="s4">(</span><span class="s1">value</span><span class="s4">))</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">stored </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage</span><span class="s4">[</span><span class="s1">st</span><span class="s4">].</span><span class="s1">get</span><span class="s4">(</span><span class="s1">typed_key</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">stored</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">stored</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">()</span>
+
+        <span class="s3">except </span><span class="s1">TypeError</span><span class="s4">:</span>
+            <span class="s1">storage </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">index_storage2</span><span class="s4">[</span><span class="s1">st</span><span class="s4">]</span>
+            <span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">len</span><span class="s4">(</span><span class="s1">storage</span><span class="s4">)-</span><span class="s5">1</span><span class="s4">, -</span><span class="s5">1</span><span class="s4">, -</span><span class="s5">1</span><span class="s4">):</span>
+                <span class="s3">if </span><span class="s1">storage</span><span class="s4">[</span><span class="s1">i</span><span class="s4">][</span><span class="s5">0</span><span class="s4">] == </span><span class="s1">typed_key</span><span class="s4">:</span>
+                    <span class="s3">return </span><span class="s1">storage</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s1">i</span><span class="s4">)[</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">insert</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">op</span><span class="s4">):</span>
+        <span class="s1">root </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__root</span>
+        <span class="s1">last </span><span class="s4">= </span><span class="s1">root</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]</span>
+        <span class="s1">last</span><span class="s4">[</span><span class="s5">1</span><span class="s4">] = </span><span class="s1">root</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] = [</span><span class="s1">last</span><span class="s4">, </span><span class="s1">root</span><span class="s4">, </span><span class="s1">op</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">root</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">):</span>
+        <span class="s1">link_prev</span><span class="s4">, </span><span class="s1">link_next</span><span class="s4">, </span><span class="s1">_ </span><span class="s4">= </span><span class="s1">index</span>
+        <span class="s1">link_prev</span><span class="s4">[</span><span class="s5">1</span><span class="s4">] = </span><span class="s1">link_next</span>
+        <span class="s1">link_next</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] = </span><span class="s1">link_prev</span>
+        <span class="s1">index</span><span class="s4">[:] = []</span>
+
+    <span class="s3">def </span><span class="s1">iter_from</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">start</span><span class="s4">):</span>
+        <span class="s1">root </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__root</span>
+        <span class="s1">curr </span><span class="s4">= </span><span class="s1">start</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+        <span class="s3">while </span><span class="s1">curr </span><span class="s3">is not </span><span class="s1">root</span><span class="s4">:</span>
+            <span class="s3">yield </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">2</span><span class="s4">]</span>
+            <span class="s1">curr </span><span class="s4">= </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">root </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__root</span>
+        <span class="s1">curr </span><span class="s4">= </span><span class="s1">root</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+        <span class="s3">while </span><span class="s1">curr </span><span class="s3">is not </span><span class="s1">root</span><span class="s4">:</span>
+            <span class="s3">yield </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">2</span><span class="s4">]</span>
+            <span class="s1">curr </span><span class="s4">= </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">execute</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">root </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__root</span>
+        <span class="s1">curr </span><span class="s4">= </span><span class="s1">root</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+        <span class="s3">while </span><span class="s1">curr </span><span class="s3">is not </span><span class="s1">root</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">root</span><span class="s4">:</span>
+                <span class="s1">op_first</span><span class="s4">, </span><span class="s1">op_second </span><span class="s4">= </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">2</span><span class="s4">], </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">][</span><span class="s5">2</span><span class="s4">]</span>
+                <span class="s3">if </span><span class="s1">op_first</span><span class="s4">.</span><span class="s1">location </span><span class="s4">== </span><span class="s1">op_second</span><span class="s4">.</span><span class="s1">location </span><span class="s3">and </span><span class="s1">\</span>
+                        <span class="s1">type</span><span class="s4">(</span><span class="s1">op_first</span><span class="s4">) == </span><span class="s1">RemoveOperation </span><span class="s3">and </span><span class="s1">\</span>
+                        <span class="s1">type</span><span class="s4">(</span><span class="s1">op_second</span><span class="s4">) == </span><span class="s1">AddOperation</span><span class="s4">:</span>
+                    <span class="s3">yield </span><span class="s1">ReplaceOperation</span><span class="s4">({</span>
+                        <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'replace'</span><span class="s4">,</span>
+                        <span class="s6">'path'</span><span class="s4">: </span><span class="s1">op_second</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+                        <span class="s6">'value'</span><span class="s4">: </span><span class="s1">op_second</span><span class="s4">.</span><span class="s1">operation</span><span class="s4">[</span><span class="s6">'value'</span><span class="s4">],</span>
+                    <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">).</span><span class="s1">operation</span>
+                    <span class="s1">curr </span><span class="s4">= </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">][</span><span class="s5">1</span><span class="s4">]</span>
+                    <span class="s3">continue</span>
+
+            <span class="s3">yield </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">2</span><span class="s4">].</span><span class="s1">operation</span>
+            <span class="s1">curr </span><span class="s4">= </span><span class="s1">curr</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">_item_added</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">item</span><span class="s4">):</span>
+        <span class="s1">index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">take_index</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_ST_REMOVE</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">index </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">op </span><span class="s4">= </span><span class="s1">index</span><span class="s4">[</span><span class="s5">2</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">type</span><span class="s4">(</span><span class="s1">op</span><span class="s4">.</span><span class="s1">key</span><span class="s4">) == </span><span class="s1">int </span><span class="s3">and </span><span class="s1">type</span><span class="s4">(</span><span class="s1">key</span><span class="s4">) == </span><span class="s1">int</span><span class="s4">:</span>
+                <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">iter_from</span><span class="s4">(</span><span class="s1">index</span><span class="s4">):</span>
+                    <span class="s1">op</span><span class="s4">.</span><span class="s1">key </span><span class="s4">= </span><span class="s1">v</span><span class="s4">.</span><span class="s1">_on_undo_remove</span><span class="s4">(</span><span class="s1">op</span><span class="s4">.</span><span class="s1">path</span><span class="s4">, </span><span class="s1">op</span><span class="s4">.</span><span class="s1">key</span><span class="s4">)</span>
+
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">op</span><span class="s4">.</span><span class="s1">location </span><span class="s4">!= </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+                <span class="s1">new_op </span><span class="s4">= </span><span class="s1">MoveOperation</span><span class="s4">({</span>
+                    <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'move'</span><span class="s4">,</span>
+                    <span class="s6">'from'</span><span class="s4">: </span><span class="s1">op</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+                    <span class="s6">'path'</span><span class="s4">: </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">),</span>
+                <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">new_op</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">new_op </span><span class="s4">= </span><span class="s1">AddOperation</span><span class="s4">({</span>
+                <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'add'</span><span class="s4">,</span>
+                <span class="s6">'path'</span><span class="s4">: </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">),</span>
+                <span class="s6">'value'</span><span class="s4">: </span><span class="s1">item</span><span class="s4">,</span>
+            <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+            <span class="s1">new_index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">new_op</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">store_index</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">new_index</span><span class="s4">, </span><span class="s1">_ST_ADD</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_item_removed</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">item</span><span class="s4">):</span>
+        <span class="s1">new_op </span><span class="s4">= </span><span class="s1">RemoveOperation</span><span class="s4">({</span>
+            <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'remove'</span><span class="s4">,</span>
+            <span class="s6">'path'</span><span class="s4">: </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">),</span>
+        <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+        <span class="s1">index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">take_index</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_ST_ADD</span><span class="s4">)</span>
+        <span class="s1">new_index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">new_op</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">index </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">op </span><span class="s4">= </span><span class="s1">index</span><span class="s4">[</span><span class="s5">2</span><span class="s4">]</span>
+            <span class="s0"># We can't rely on the op.key type since PatchOperation casts</span>
+            <span class="s0"># the .key property to int and this path wrongly ends up being taken</span>
+            <span class="s0"># for numeric string dict keys while the intention is to only handle lists.</span>
+            <span class="s0"># So we do an explicit check on the item affected by the op instead.</span>
+            <span class="s1">added_item </span><span class="s4">= </span><span class="s1">op</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">.</span><span class="s1">to_last</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">dst_doc</span><span class="s4">)[</span><span class="s5">0</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">type</span><span class="s4">(</span><span class="s1">added_item</span><span class="s4">) == </span><span class="s1">list</span><span class="s4">:</span>
+                <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">iter_from</span><span class="s4">(</span><span class="s1">index</span><span class="s4">):</span>
+                    <span class="s1">op</span><span class="s4">.</span><span class="s1">key </span><span class="s4">= </span><span class="s1">v</span><span class="s4">.</span><span class="s1">_on_undo_add</span><span class="s4">(</span><span class="s1">op</span><span class="s4">.</span><span class="s1">path</span><span class="s4">, </span><span class="s1">op</span><span class="s4">.</span><span class="s1">key</span><span class="s4">)</span>
+
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">new_op</span><span class="s4">.</span><span class="s1">location </span><span class="s4">!= </span><span class="s1">op</span><span class="s4">.</span><span class="s1">location</span><span class="s4">:</span>
+                <span class="s1">new_op </span><span class="s4">= </span><span class="s1">MoveOperation</span><span class="s4">({</span>
+                    <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'move'</span><span class="s4">,</span>
+                    <span class="s6">'from'</span><span class="s4">: </span><span class="s1">new_op</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+                    <span class="s6">'path'</span><span class="s4">: </span><span class="s1">op</span><span class="s4">.</span><span class="s1">location</span><span class="s4">,</span>
+                <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">)</span>
+                <span class="s1">new_index</span><span class="s4">[</span><span class="s5">2</span><span class="s4">] = </span><span class="s1">new_op</span>
+
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">new_index</span><span class="s4">)</span>
+
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">store_index</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">new_index</span><span class="s4">, </span><span class="s1">_ST_REMOVE</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_item_replaced</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">item</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">ReplaceOperation</span><span class="s4">({</span>
+            <span class="s6">'op'</span><span class="s4">: </span><span class="s6">'replace'</span><span class="s4">,</span>
+            <span class="s6">'path'</span><span class="s4">: </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">),</span>
+            <span class="s6">'value'</span><span class="s4">: </span><span class="s1">item</span><span class="s4">,</span>
+        <span class="s4">}, </span><span class="s1">pointer_cls</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">pointer_cls</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">_compare_dicts</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">):</span>
+        <span class="s1">src_keys </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">src</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">())</span>
+        <span class="s1">dst_keys </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">dst</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">())</span>
+        <span class="s1">added_keys </span><span class="s4">= </span><span class="s1">dst_keys </span><span class="s4">- </span><span class="s1">src_keys</span>
+        <span class="s1">removed_keys </span><span class="s4">= </span><span class="s1">src_keys </span><span class="s4">- </span><span class="s1">dst_keys</span>
+
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">removed_keys</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_removed</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">str</span><span class="s4">(</span><span class="s1">key</span><span class="s4">), </span><span class="s1">src</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">added_keys</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_added</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">str</span><span class="s4">(</span><span class="s1">key</span><span class="s4">), </span><span class="s1">dst</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">src_keys </span><span class="s4">&amp; </span><span class="s1">dst_keys</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_compare_values</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">src</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s1">dst</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+    <span class="s3">def </span><span class="s1">_compare_lists</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">):</span>
+        <span class="s1">len_src</span><span class="s4">, </span><span class="s1">len_dst </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">src</span><span class="s4">), </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dst</span><span class="s4">)</span>
+        <span class="s1">max_len </span><span class="s4">= </span><span class="s1">max</span><span class="s4">(</span><span class="s1">len_src</span><span class="s4">, </span><span class="s1">len_dst</span><span class="s4">)</span>
+        <span class="s1">min_len </span><span class="s4">= </span><span class="s1">min</span><span class="s4">(</span><span class="s1">len_src</span><span class="s4">, </span><span class="s1">len_dst</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">max_len</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s4">&lt; </span><span class="s1">min_len</span><span class="s4">:</span>
+                <span class="s1">old</span><span class="s4">, </span><span class="s1">new </span><span class="s4">= </span><span class="s1">src</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s1">dst</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+                <span class="s3">if </span><span class="s1">old </span><span class="s4">== </span><span class="s1">new</span><span class="s4">:</span>
+                    <span class="s3">continue</span>
+
+                <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">old</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">) </span><span class="s3">and </span><span class="s1">\</span>
+                    <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">new</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">):</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_compare_dicts</span><span class="s4">(</span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">), </span><span class="s1">old</span><span class="s4">, </span><span class="s1">new</span><span class="s4">)</span>
+
+                <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">old</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">) </span><span class="s3">and </span><span class="s1">\</span>
+                        <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">new</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">):</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_compare_lists</span><span class="s4">(</span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">), </span><span class="s1">old</span><span class="s4">, </span><span class="s1">new</span><span class="s4">)</span>
+
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_removed</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">old</span><span class="s4">)</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_added</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">new</span><span class="s4">)</span>
+
+            <span class="s3">elif </span><span class="s1">len_src </span><span class="s4">&gt; </span><span class="s1">len_dst</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_removed</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">len_dst</span><span class="s4">, </span><span class="s1">src</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_added</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">[</span><span class="s1">key</span><span class="s4">])</span>
+
+    <span class="s3">def </span><span class="s1">_compare_values</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">src</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">) </span><span class="s3">and </span><span class="s1">\</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">dst</span><span class="s4">, </span><span class="s1">MutableMapping</span><span class="s4">):</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_compare_dicts</span><span class="s4">(</span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">), </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">)</span>
+
+        <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">src</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">) </span><span class="s3">and </span><span class="s1">\</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">dst</span><span class="s4">, </span><span class="s1">MutableSequence</span><span class="s4">):</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_compare_lists</span><span class="s4">(</span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">), </span><span class="s1">src</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">)</span>
+
+        <span class="s0"># To ensure we catch changes to JSON, we can't rely on a simple</span>
+        <span class="s0"># src == dst, because it would not recognize the difference between</span>
+        <span class="s0"># 1 and True, among other things. Using json.dumps is the most</span>
+        <span class="s0"># fool-proof way to ensure we catch type changes that matter to JSON</span>
+        <span class="s0"># and ignore those that don't. The performance of this could be</span>
+        <span class="s0"># improved by doing more direct type checks, but we'd need to be</span>
+        <span class="s0"># careful to accept type changes that don't matter when JSONified.</span>
+        <span class="s3">elif </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dumps</span><span class="s4">(</span><span class="s1">src</span><span class="s4">) == </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dumps</span><span class="s4">(</span><span class="s1">dst</span><span class="s4">):</span>
+            <span class="s3">return</span>
+
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_item_replaced</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">dst</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_path_join</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">key </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">path</span>
+
+    <span class="s3">return </span><span class="s1">path </span><span class="s4">+ </span><span class="s6">'/' </span><span class="s4">+ </span><span class="s1">str</span><span class="s4">(</span><span class="s1">key</span><span class="s4">).</span><span class="s1">replace</span><span class="s4">(</span><span class="s6">'~'</span><span class="s4">, </span><span class="s6">'~0'</span><span class="s4">).</span><span class="s1">replace</span><span class="s4">(</span><span class="s6">'/'</span><span class="s4">, </span><span class="s6">'~1'</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

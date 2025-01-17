@@ -1,0 +1,273 @@
+<html>
+<head>
+<title>activate.ps1</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+.s1 { color: #7a7e85;}
+.s2 { color: #c77dbb; font-style: italic;}
+.s3 { color: #bcbec4;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #bcbec4; font-style: italic;}
+.s6 { color: #56a8f5;}
+.s7 { color: #6aab73;}
+.s8 { color: #2aacb8; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activate.ps1</font>
+</center></td></tr></table>
+<pre><span class="s0">&lt;#</span>
+<span class="s2">.</span><span class="s0">Synopsis</span>
+<span class="s1">Activate a Python virtual environment for the current PowerShell session. 
+</span>
+<span class="s2">.</span><span class="s0">Description</span>
+<span class="s1">Pushes the python executable for a virtual environment to the front of the 
+$Env:PATH environment variable and sets the prompt to signify that you are 
+in a Python virtual environment. Makes use of the command line switches as 
+well as the `pyvenv.cfg` file values present in the virtual environment. 
+</span>
+<span class="s2">.</span><span class="s0">Parameter VenvDir</span>
+<span class="s1">Path to the directory that contains the virtual environment to activate. The 
+default value for this is the parent of the directory that the Activate.ps1 
+script is located within. 
+</span>
+<span class="s2">.</span><span class="s0">Parameter Prompt</span>
+<span class="s1">The prompt prefix to display when this virtual environment is activated. By 
+default, this prompt is the name of the virtual environment folder (VenvDir) 
+surrounded by parentheses and followed by a single space (ie. '(.venv) '). 
+</span>
+<span class="s2">.</span><span class="s0">Example</span>
+<span class="s1">Activate.ps1 
+Activates the Python virtual environment that contains the Activate.ps1 script. 
+</span>
+<span class="s2">.</span><span class="s0">Example</span>
+<span class="s1">Activate.ps1 -Verbose 
+Activates the Python virtual environment that contains the Activate.ps1 script, 
+and shows extra information about the activation as it executes. 
+</span>
+<span class="s2">.</span><span class="s0">Example</span>
+<span class="s1">Activate.ps1 -VenvDir C:\Users\MyUser\Common\.venv 
+Activates the Python virtual environment located in the specified location. 
+</span>
+<span class="s2">.</span><span class="s0">Example</span>
+<span class="s1">Activate.ps1 -Prompt &quot;MyPython&quot; 
+Activates the Python virtual environment that contains the Activate.ps1 script, 
+and prefixes the current prompt with the specified string (surrounded in 
+parentheses) while the virtual environment is active. 
+</span>
+<span class="s2">.</span><span class="s0">Notes</span>
+<span class="s1">On Windows, it may be required to enable this Activate.ps1 script by setting the 
+execution policy for the user. You can do this by issuing the following PowerShell 
+command: 
+</span>
+<span class="s1">PS C:\&gt; Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser 
+</span>
+<span class="s1">For more information on Execution Policies:  
+https://go.microsoft.com/fwlink/?LinkID=135170 
+</span>
+<span class="s0">#&gt;</span>
+<span class="s4">Param</span><span class="s0">(</span>
+    <span class="s0">[Parameter(Mandatory = </span><span class="s5">$</span><span class="s2">false</span><span class="s0">)]</span>
+    <span class="s0">[</span><span class="s4">String</span><span class="s0">]</span>
+    <span class="s0">$VenvDir,</span>
+    <span class="s0">[Parameter(Mandatory = </span><span class="s5">$</span><span class="s2">false</span><span class="s0">)]</span>
+    <span class="s0">[</span><span class="s4">String</span><span class="s0">]</span>
+    <span class="s0">$Prompt</span>
+<span class="s0">)</span>
+
+<span class="s0">&lt;# </span><span class="s1">Function declarations --------------------------------------------------- </span><span class="s0">#&gt;</span>
+
+<span class="s0">&lt;#</span>
+<span class="s2">.</span><span class="s0">Synopsis</span>
+<span class="s1">Remove all shell session elements added by the Activate script, including the 
+addition of the virtual environment's Python executable from the beginning of 
+the PATH variable. 
+</span>
+<span class="s2">.</span><span class="s0">Parameter NonDestructive</span>
+<span class="s1">If present, do not remove this function from the global namespace for the 
+session. 
+</span>
+<span class="s0">#&gt;</span>
+<span class="s4">function global</span><span class="s3">:</span><span class="s6">deactivate </span><span class="s0">([</span><span class="s4">switch</span><span class="s0">]$NonDestructive) {</span>
+    <span class="s0"># </span><span class="s1">Revert to original values 
+</span>
+    <span class="s0"># </span><span class="s1">The prior prompt: 
+    </span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Function:_OLD_VIRTUAL_PROMPT</span><span class="s0">) {</span>
+        <span class="s0">Copy-Item -</span><span class="s3">Path Function:_OLD_VIRTUAL_PROMPT </span><span class="s0">-</span><span class="s3">Destination Function:prompt 
+        </span><span class="s0">Remove-Item -</span><span class="s3">Path Function:_OLD_VIRTUAL_PROMPT 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">The prior PYTHONHOME: 
+    </span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Env:_OLD_VIRTUAL_PYTHONHOME</span><span class="s0">) {</span>
+        <span class="s0">Copy-Item -</span><span class="s3">Path Env:_OLD_VIRTUAL_PYTHONHOME </span><span class="s0">-</span><span class="s3">Destination Env:PYTHONHOME 
+        </span><span class="s0">Remove-Item -</span><span class="s3">Path Env:_OLD_VIRTUAL_PYTHONHOME 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">The prior PATH: 
+    </span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Env:_OLD_VIRTUAL_PATH</span><span class="s0">) {</span>
+        <span class="s0">Copy-Item -</span><span class="s3">Path Env:_OLD_VIRTUAL_PATH </span><span class="s0">-</span><span class="s3">Destination Env:PATH 
+        </span><span class="s0">Remove-Item -</span><span class="s3">Path Env:_OLD_VIRTUAL_PATH 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">Just remove the VIRTUAL_ENV altogether: 
+    </span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Env:VIRTUAL_ENV</span><span class="s0">) {</span>
+        <span class="s0">Remove-Item -</span><span class="s3">Path env:VIRTUAL_ENV 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">Just remove VIRTUAL_ENV_PROMPT altogether. 
+    </span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Env:VIRTUAL_ENV_PROMPT</span><span class="s0">) {</span>
+        <span class="s0">Remove-Item -</span><span class="s3">Path env:VIRTUAL_ENV_PROMPT 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">Just remove the _PYTHON_VENV_PROMPT_PREFIX altogether: 
+    </span><span class="s4">if </span><span class="s0">(Get-Variable -</span><span class="s3">Name </span><span class="s0">&quot;</span><span class="s7">_PYTHON_VENV_PROMPT_PREFIX</span><span class="s0">&quot; -</span><span class="s3">ErrorAction SilentlyContinue</span><span class="s0">) {</span>
+        <span class="s0">Remove-Variable -</span><span class="s3">Name _PYTHON_VENV_PROMPT_PREFIX </span><span class="s0">-</span><span class="s3">Scope Global </span><span class="s0">-</span><span class="s3">Force 
+    </span><span class="s0">}</span>
+
+    <span class="s0"># </span><span class="s1">Leave deactivate function in the global namespace if requested: 
+    </span><span class="s4">if </span><span class="s0">(-not $NonDestructive) {</span>
+        <span class="s0">Remove-Item -</span><span class="s3">Path function:deactivate 
+    </span><span class="s0">}</span>
+<span class="s0">}</span>
+
+<span class="s0">&lt;#</span>
+<span class="s2">.</span><span class="s0">Description</span>
+<span class="s1">Get-PyVenvConfig parses the values from the pyvenv.cfg file located in the 
+given folder, and returns them in a map. 
+</span>
+<span class="s1">For each line in the pyvenv.cfg file, if that line can be parsed into exactly 
+two strings separated by `=` (with any amount of whitespace surrounding the =) 
+then it is considered a `key = value` line. The left hand string is the key, 
+the right hand is the value. 
+</span>
+<span class="s1">If the value starts with a `'` or a `&quot;` then the first and last character is 
+stripped from the value before being captured. 
+</span>
+<span class="s2">.</span><span class="s0">Parameter ConfigDir</span>
+<span class="s1">Path to the directory that contains the `pyvenv.cfg` file. 
+</span><span class="s0">#&gt;</span>
+<span class="s4">function </span><span class="s6">Get-PyVenvConfig</span><span class="s0">(</span>
+    <span class="s0">[</span><span class="s4">String</span><span class="s0">]</span>
+    <span class="s0">$ConfigDir</span>
+<span class="s0">) {</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">Given ConfigDir=</span><span class="s0">$ConfigDir</span><span class="s7">, obtain values in pyvenv.cfg</span><span class="s0">&quot;</span>
+
+    <span class="s0"># </span><span class="s1">Ensure the file exists, and issue a warning if it doesn't (but still allow the function to continue). 
+    </span><span class="s0">$pyvenvConfigPath = Join-Path -</span><span class="s3">Resolve </span><span class="s0">-</span><span class="s3">Path </span><span class="s0">$ConfigDir -</span><span class="s3">ChildPath </span><span class="s0">'</span><span class="s7">pyvenv.cfg</span><span class="s0">' -</span><span class="s3">ErrorAction </span><span class="s4">Continue</span>
+
+    <span class="s0"># </span><span class="s1">An empty map will be returned if no config file is found. 
+    </span><span class="s0">$pyvenvConfig = </span><span class="s4">@</span><span class="s0">{ }</span>
+
+    <span class="s4">if </span><span class="s0">($pyvenvConfigPath) {</span>
+
+        <span class="s0">Write-Verbose &quot;</span><span class="s7">File exists, parse `key = value` lines</span><span class="s0">&quot;</span>
+        <span class="s0">$pyvenvConfigContent = Get-Content -</span><span class="s3">Path </span><span class="s0">$pyvenvConfigPath</span>
+
+        <span class="s0">$pyvenvConfigContent | ForEach-Object {</span>
+            <span class="s0">$keyval = $</span><span class="s3">PSItem </span><span class="s0">-split &quot;</span><span class="s7">\s*=\s*</span><span class="s0">&quot;, </span><span class="s8">2</span>
+            <span class="s4">if </span><span class="s0">($keyval[</span><span class="s8">0</span><span class="s0">] -and $keyval[</span><span class="s8">1</span><span class="s0">]) {</span>
+                <span class="s0">$val = $keyval[</span><span class="s8">1</span><span class="s0">]</span>
+
+                <span class="s0"># </span><span class="s1">Remove extraneous quotations around a string value. 
+                </span><span class="s4">if </span><span class="s0">(&quot;</span><span class="s7">'</span><span class="s0">&quot;&quot;&quot;</span><span class="s3">.Contains</span><span class="s0">($val.Substring(</span><span class="s8">0</span><span class="s0">, </span><span class="s8">1</span><span class="s0">))) {</span>
+                    <span class="s0">$val = $val.Substring(</span><span class="s8">1</span><span class="s0">, $val.Length - </span><span class="s8">2</span><span class="s0">)</span>
+                <span class="s0">}</span>
+
+                <span class="s0">$pyvenvConfig[$keyval[</span><span class="s8">0</span><span class="s0">]] = $val</span>
+                <span class="s0">Write-Verbose &quot;</span><span class="s7">Adding Key: '</span><span class="s3">$(</span><span class="s0">$keyval[</span><span class="s8">0</span><span class="s0">]</span><span class="s3">)</span><span class="s7">'='</span><span class="s0">$val</span><span class="s7">'</span><span class="s0">&quot;</span>
+            <span class="s0">}</span>
+        <span class="s0">}</span>
+    <span class="s0">}</span>
+    <span class="s4">return </span><span class="s0">$pyvenvConfig</span>
+<span class="s0">}</span>
+
+
+<span class="s0">&lt;# </span><span class="s1">Begin Activate script --------------------------------------------------- </span><span class="s0">#&gt;</span>
+
+<span class="s0"># </span><span class="s1">Determine the containing directory of this script 
+</span><span class="s0">$VenvExecPath = Split-Path -</span><span class="s3">Parent </span><span class="s0">$</span><span class="s3">MyInvocation</span><span class="s0">.MyCommand.Definition</span>
+<span class="s0">$VenvExecDir = Get-Item -</span><span class="s3">Path </span><span class="s0">$VenvExecPath</span>
+
+<span class="s0">Write-Verbose &quot;</span><span class="s7">Activation script is located in path: '</span><span class="s0">$VenvExecPath</span><span class="s7">'</span><span class="s0">&quot;</span>
+<span class="s0">Write-Verbose &quot;</span><span class="s7">VenvExecDir Fullname: '</span><span class="s3">$(</span><span class="s0">$VenvExecDir.FullName</span><span class="s3">)</span><span class="s0">&quot;</span>
+<span class="s0">Write-Verbose &quot;</span><span class="s7">VenvExecDir Name: '</span><span class="s3">$(</span><span class="s0">$VenvExecDir.Name</span><span class="s3">)</span><span class="s0">&quot;</span>
+
+<span class="s0"># </span><span class="s1">Set values required in priority: CmdLine, ConfigFile, Default 
+</span><span class="s0"># </span><span class="s1">First, get the location of the virtual environment, it might not be 
+</span><span class="s0"># </span><span class="s1">VenvExecDir if specified on the command line. 
+</span><span class="s4">if </span><span class="s0">($VenvDir) {</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">VenvDir given as parameter, using '</span><span class="s0">$VenvDir</span><span class="s7">' to determine values</span><span class="s0">&quot;</span>
+<span class="s0">}</span>
+<span class="s4">else </span><span class="s0">{</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">VenvDir not given as a parameter, using parent directory name as VenvDir.</span><span class="s0">&quot;</span>
+    <span class="s0">$VenvDir = $VenvExecDir.Parent.FullName.TrimEnd(&quot;</span><span class="s7">\\/</span><span class="s0">&quot;)</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">VenvDir=</span><span class="s0">$VenvDir&quot;</span>
+<span class="s0">}</span>
+
+<span class="s0"># </span><span class="s1">Next, read the `pyvenv.cfg` file to determine any required value such 
+</span><span class="s0"># </span><span class="s1">as `prompt`. 
+</span><span class="s0">$pyvenvCfg = Get-PyVenvConfig -</span><span class="s3">ConfigDir </span><span class="s0">$VenvDir</span>
+
+<span class="s0"># </span><span class="s1">Next, set the prompt from the command line, or the config file, or 
+</span><span class="s0"># </span><span class="s1">just use the name of the virtual environment folder. 
+</span><span class="s4">if </span><span class="s0">($Prompt) {</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">Prompt specified as argument, using '</span><span class="s0">$Prompt</span><span class="s7">'</span><span class="s0">&quot;</span>
+<span class="s0">}</span>
+<span class="s4">else </span><span class="s0">{</span>
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">Prompt not specified as argument to script, checking pyvenv.cfg value</span><span class="s0">&quot;</span>
+    <span class="s4">if </span><span class="s0">($pyvenvCfg -and $pyvenvCfg['</span><span class="s7">prompt</span><span class="s0">']) {</span>
+        <span class="s0">Write-Verbose &quot;  </span><span class="s7">Setting based on value in pyvenv.cfg='</span><span class="s3">$(</span><span class="s0">$pyvenvCfg['</span><span class="s7">prompt</span><span class="s0">']</span><span class="s3">)</span><span class="s7">'</span><span class="s0">&quot;</span>
+        <span class="s0">$Prompt = $pyvenvCfg['</span><span class="s7">prompt</span><span class="s0">'];</span>
+    <span class="s0">}</span>
+    <span class="s4">else </span><span class="s0">{</span>
+        <span class="s0">Write-Verbose &quot;  </span><span class="s7">Setting prompt based on parent's directory's name. (Is the directory name passed to venv module when creating the virtual environment)</span><span class="s0">&quot;</span>
+        <span class="s0">Write-Verbose &quot;  </span><span class="s7">Got leaf-name of </span><span class="s0">$VenvDir</span><span class="s7">='</span><span class="s3">$(</span><span class="s0">Split-Path -</span><span class="s3">Path </span><span class="s0">$venvDir -</span><span class="s3">Leaf)</span><span class="s7">'</span><span class="s0">&quot;</span>
+        <span class="s0">$Prompt = Split-Path -</span><span class="s3">Path </span><span class="s0">$venvDir -</span><span class="s3">Leaf 
+    </span><span class="s0">}</span>
+<span class="s0">}</span>
+
+<span class="s0">Write-Verbose &quot;</span><span class="s7">Prompt = '</span><span class="s0">$Prompt</span><span class="s7">'</span><span class="s0">&quot;</span>
+<span class="s0">Write-Verbose &quot;</span><span class="s7">VenvDir='</span><span class="s0">$VenvDir</span><span class="s7">'</span><span class="s0">&quot;</span>
+
+<span class="s0"># </span><span class="s1">Deactivate any currently active virtual environment, but leave the 
+</span><span class="s0"># </span><span class="s1">deactivate function in place. 
+</span><span class="s3">deactivate </span><span class="s0">-</span><span class="s3">nondestructive 
+</span>
+<span class="s0"># </span><span class="s1">Now set the environment variable VIRTUAL_ENV, used by many tools to determine 
+</span><span class="s0"># </span><span class="s1">that there is an activated venv. 
+</span><span class="s0">$env:VIRTUAL_ENV = $VenvDir</span>
+
+<span class="s0">$env:VIRTUAL_ENV_PROMPT = $Prompt</span>
+
+<span class="s4">if </span><span class="s0">(-not $Env:VIRTUAL_ENV_DISABLE_PROMPT) {</span>
+
+    <span class="s0">Write-Verbose &quot;</span><span class="s7">Setting prompt to '</span><span class="s0">$Prompt</span><span class="s7">'</span><span class="s0">&quot;</span>
+
+    <span class="s0"># </span><span class="s1">Set the prompt to include the env name 
+    </span><span class="s0"># </span><span class="s1">Make sure _OLD_VIRTUAL_PROMPT is global 
+    </span><span class="s4">function global</span><span class="s3">:</span><span class="s6">_OLD_VIRTUAL_PROMPT </span><span class="s0">{ &quot;&quot; }</span>
+    <span class="s0">Copy-Item -</span><span class="s3">Path function:prompt </span><span class="s0">-</span><span class="s3">Destination function:_OLD_VIRTUAL_PROMPT 
+    </span><span class="s0">New-Variable -</span><span class="s3">Name _PYTHON_VENV_PROMPT_PREFIX </span><span class="s0">-</span><span class="s3">Description </span><span class="s0">&quot;</span><span class="s7">Python virtual environment prompt prefix</span><span class="s0">&quot; -</span><span class="s3">Scope Global </span><span class="s0">-</span><span class="s3">Option ReadOnly </span><span class="s0">-</span><span class="s3">Visibility Public </span><span class="s0">-</span><span class="s3">Value </span><span class="s0">$Prompt</span>
+
+    <span class="s4">function global</span><span class="s3">:</span><span class="s6">prompt </span><span class="s0">{</span>
+        <span class="s0">Write-Host -</span><span class="s3">NoNewline </span><span class="s0">-</span><span class="s3">ForegroundColor Green </span><span class="s0">&quot;</span><span class="s7">(</span><span class="s0">$_PYTHON_VENV_PROMPT_PREFIX</span><span class="s7">) </span><span class="s0">&quot;</span>
+        <span class="s3">_OLD_VIRTUAL_PROMPT 
+    </span><span class="s0">}</span>
+<span class="s0">}</span>
+
+<span class="s0"># </span><span class="s1">Clear PYTHONHOME 
+</span><span class="s4">if </span><span class="s0">(Test-Path -</span><span class="s3">Path Env:PYTHONHOME</span><span class="s0">) {</span>
+    <span class="s0">Copy-Item -</span><span class="s3">Path Env:PYTHONHOME </span><span class="s0">-</span><span class="s3">Destination Env:_OLD_VIRTUAL_PYTHONHOME 
+    </span><span class="s0">Remove-Item -</span><span class="s3">Path Env:PYTHONHOME 
+</span><span class="s0">}</span>
+
+<span class="s0"># </span><span class="s1">Add the venv to the PATH 
+</span><span class="s0">Copy-Item -</span><span class="s3">Path Env:PATH </span><span class="s0">-</span><span class="s3">Destination Env:_OLD_VIRTUAL_PATH 
+</span><span class="s0">$Env:PATH = &quot;$VenvExecDir</span><span class="s3">$(</span><span class="s0">[</span><span class="s4">System.IO.Path</span><span class="s0">]</span><span class="s3">::PathSeparator)</span><span class="s0">$Env:PATH&quot;</span>
+</pre>
+</body>
+</html>

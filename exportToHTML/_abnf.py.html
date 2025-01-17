@@ -1,0 +1,152 @@
+<html>
+<head>
+<title>_abnf.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_abnf.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># We use native strings for all the re patterns, to take advantage of string</span>
+<span class="s0"># formatting, and then convert to bytestrings when compiling the final re</span>
+<span class="s0"># objects.</span>
+
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#whitespace</span>
+<span class="s0">#  OWS            = *( SP / HTAB )</span>
+<span class="s0">#                 ; optional whitespace</span>
+<span class="s1">OWS </span><span class="s2">= </span><span class="s3">r&quot;[ \t]*&quot;</span>
+
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#rule.token.separators</span>
+<span class="s0">#   token          = 1*tchar</span>
+<span class="s0">#</span>
+<span class="s0">#   tchar          = &quot;!&quot; / &quot;#&quot; / &quot;$&quot; / &quot;%&quot; / &quot;&amp;&quot; / &quot;'&quot; / &quot;*&quot;</span>
+<span class="s0">#                  / &quot;+&quot; / &quot;-&quot; / &quot;.&quot; / &quot;^&quot; / &quot;_&quot; / &quot;`&quot; / &quot;|&quot; / &quot;~&quot;</span>
+<span class="s0">#                  / DIGIT / ALPHA</span>
+<span class="s0">#                  ; any VCHAR, except delimiters</span>
+<span class="s1">token </span><span class="s2">= </span><span class="s3">r&quot;[-!#$%&amp;'*+.^_`|~0-9a-zA-Z]+&quot;</span>
+
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#header.fields</span>
+<span class="s0">#  field-name     = token</span>
+<span class="s1">field_name </span><span class="s2">= </span><span class="s1">token</span>
+
+<span class="s0"># The standard says:</span>
+<span class="s0">#</span>
+<span class="s0">#  field-value    = *( field-content / obs-fold )</span>
+<span class="s0">#  field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]</span>
+<span class="s0">#  field-vchar    = VCHAR / obs-text</span>
+<span class="s0">#  obs-fold       = CRLF 1*( SP / HTAB )</span>
+<span class="s0">#                 ; obsolete line folding</span>
+<span class="s0">#                 ; see Section 3.2.4</span>
+<span class="s0">#</span>
+<span class="s0"># https://tools.ietf.org/html/rfc5234#appendix-B.1</span>
+<span class="s0">#</span>
+<span class="s0">#   VCHAR          =  %x21-7E</span>
+<span class="s0">#                  ; visible (printing) characters</span>
+<span class="s0">#</span>
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#rule.quoted-string</span>
+<span class="s0">#   obs-text       = %x80-FF</span>
+<span class="s0">#</span>
+<span class="s0"># However, the standard definition of field-content is WRONG! It disallows</span>
+<span class="s0"># fields containing a single visible character surrounded by whitespace,</span>
+<span class="s0"># e.g. &quot;foo a bar&quot;.</span>
+<span class="s0">#</span>
+<span class="s0"># See: https://www.rfc-editor.org/errata_search.php?rfc=7230&amp;eid=4189</span>
+<span class="s0">#</span>
+<span class="s0"># So our definition of field_content attempts to fix it up...</span>
+<span class="s0">#</span>
+<span class="s0"># Also, we allow lots of control characters, because apparently people assume</span>
+<span class="s0"># that they're legal in practice (e.g., google analytics makes cookies with</span>
+<span class="s0"># \x01 in them!):</span>
+<span class="s0">#   https://github.com/python-hyper/h11/issues/57</span>
+<span class="s0"># We still don't allow NUL or whitespace, because those are often treated as</span>
+<span class="s0"># meta-characters and letting them through can lead to nasty issues like SSRF.</span>
+<span class="s1">vchar </span><span class="s2">= </span><span class="s3">r&quot;[\x21-\x7e]&quot;</span>
+<span class="s1">vchar_or_obs_text </span><span class="s2">= </span><span class="s3">r&quot;[^\x00\s]&quot;</span>
+<span class="s1">field_vchar </span><span class="s2">= </span><span class="s1">vchar_or_obs_text</span>
+<span class="s1">field_content </span><span class="s2">= </span><span class="s3">r&quot;{field_vchar}+(?:[ \t]+{field_vchar}+)*&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+
+<span class="s0"># We handle obs-fold at a different level, and our fixed-up field_content</span>
+<span class="s0"># already grows to swallow the whole value, so ? instead of *</span>
+<span class="s1">field_value </span><span class="s2">= </span><span class="s3">r&quot;({field_content})?&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+
+<span class="s0">#  header-field   = field-name &quot;:&quot; OWS field-value OWS</span>
+<span class="s1">header_field </span><span class="s2">= (</span>
+    <span class="s3">r&quot;(?P&lt;field_name&gt;{field_name})&quot;</span>
+    <span class="s3">r&quot;:&quot;</span>
+    <span class="s3">r&quot;{OWS}&quot;</span>
+    <span class="s3">r&quot;(?P&lt;field_value&gt;{field_value})&quot;</span>
+    <span class="s3">r&quot;{OWS}&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s2">)</span>
+
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#request.line</span>
+<span class="s0">#</span>
+<span class="s0">#   request-line   = method SP request-target SP HTTP-version CRLF</span>
+<span class="s0">#   method         = token</span>
+<span class="s0">#   HTTP-version   = HTTP-name &quot;/&quot; DIGIT &quot;.&quot; DIGIT</span>
+<span class="s0">#   HTTP-name      = %x48.54.54.50 ; &quot;HTTP&quot;, case-sensitive</span>
+<span class="s0">#</span>
+<span class="s0"># request-target is complicated (see RFC 7230 sec 5.3) -- could be path, full</span>
+<span class="s0"># URL, host+port (for connect), or even &quot;*&quot;, but in any case we are guaranteed</span>
+<span class="s0"># that it contists of the visible printing characters.</span>
+<span class="s1">method </span><span class="s2">= </span><span class="s1">token</span>
+<span class="s1">request_target </span><span class="s2">= </span><span class="s3">r&quot;{vchar}+&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s1">http_version </span><span class="s2">= </span><span class="s3">r&quot;HTTP/(?P&lt;http_version&gt;[0-9]\.[0-9])&quot;</span>
+<span class="s1">request_line </span><span class="s2">= (</span>
+    <span class="s3">r&quot;(?P&lt;method&gt;{method})&quot;</span>
+    <span class="s3">r&quot; &quot;</span>
+    <span class="s3">r&quot;(?P&lt;target&gt;{request_target})&quot;</span>
+    <span class="s3">r&quot; &quot;</span>
+    <span class="s3">r&quot;{http_version}&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s2">)</span>
+
+<span class="s0"># https://svn.tools.ietf.org/svn/wg/httpbis/specs/rfc7230.html#status.line</span>
+<span class="s0">#</span>
+<span class="s0">#   status-line = HTTP-version SP status-code SP reason-phrase CRLF</span>
+<span class="s0">#   status-code    = 3DIGIT</span>
+<span class="s0">#   reason-phrase  = *( HTAB / SP / VCHAR / obs-text )</span>
+<span class="s1">status_code </span><span class="s2">= </span><span class="s3">r&quot;[0-9]{3}&quot;</span>
+<span class="s1">reason_phrase </span><span class="s2">= </span><span class="s3">r&quot;([ \t]|{vchar_or_obs_text})*&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s1">status_line </span><span class="s2">= (</span>
+    <span class="s3">r&quot;{http_version}&quot;</span>
+    <span class="s3">r&quot; &quot;</span>
+    <span class="s3">r&quot;(?P&lt;status_code&gt;{status_code})&quot;</span>
+    <span class="s0"># However, there are apparently a few too many servers out there that just</span>
+    <span class="s0"># leave out the reason phrase:</span>
+    <span class="s0">#   https://github.com/scrapy/scrapy/issues/345#issuecomment-281756036</span>
+    <span class="s0">#   https://github.com/seanmonstar/httparse/issues/29</span>
+    <span class="s0"># so make it optional. ?: is a non-capturing group.</span>
+    <span class="s3">r&quot;(?: (?P&lt;reason&gt;{reason_phrase}))?&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s2">)</span>
+
+<span class="s1">HEXDIG </span><span class="s2">= </span><span class="s3">r&quot;[0-9A-Fa-f]&quot;</span>
+<span class="s0"># Actually</span>
+<span class="s0">#</span>
+<span class="s0">#      chunk-size     = 1*HEXDIG</span>
+<span class="s0">#</span>
+<span class="s0"># but we impose an upper-limit to avoid ridiculosity. len(str(2**64)) == 20</span>
+<span class="s1">chunk_size </span><span class="s2">= </span><span class="s3">r&quot;({HEXDIG}){{1,20}}&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(**</span><span class="s1">globals</span><span class="s2">())</span>
+<span class="s0"># Actually</span>
+<span class="s0">#</span>
+<span class="s0">#     chunk-ext      = *( &quot;;&quot; chunk-ext-name [ &quot;=&quot; chunk-ext-val ] )</span>
+<span class="s0">#</span>
+<span class="s0"># but we aren't parsing the things so we don't really care.</span>
+<span class="s1">chunk_ext </span><span class="s2">= </span><span class="s3">r&quot;;.*&quot;</span>
+<span class="s1">chunk_header </span><span class="s2">= (</span>
+    <span class="s3">r&quot;(?P&lt;chunk_size&gt;{chunk_size})&quot;</span>
+    <span class="s3">r&quot;(?P&lt;chunk_ext&gt;{chunk_ext})?&quot;</span>
+    <span class="s3">r&quot;{OWS}\r\n&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span>
+        <span class="s2">**</span><span class="s1">globals</span><span class="s2">()</span>
+    <span class="s2">)  </span><span class="s0"># Even though the specification does not allow for extra whitespaces,</span>
+    <span class="s0"># we are lenient with trailing whitespaces because some servers on the wild use it.</span>
+<span class="s2">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<html>
+<head>
+<title>langchain-server</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+langchain-server</font>
+</center></td></tr></table>
+<pre><span class="s0">#!/Users/niladriray/PycharmProjects/PNCGenAI/.venv/bin/python</span>
+<span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">langchain</span><span class="s3">.</span><span class="s1">server </span><span class="s2">import </span><span class="s1">main</span>
+<span class="s2">if </span><span class="s1">__name__ </span><span class="s3">== </span><span class="s4">'__main__'</span><span class="s3">:</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s5">0</span><span class="s3">] = </span><span class="s1">re</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s4">r'(-script\.pyw|\.exe)?$'</span><span class="s3">, </span><span class="s4">''</span><span class="s3">, </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">argv</span><span class="s3">[</span><span class="s5">0</span><span class="s3">])</span>
+    <span class="s1">sys</span><span class="s3">.</span><span class="s1">exit</span><span class="s3">(</span><span class="s1">main</span><span class="s3">())</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<html>
+<head>
+<title>test_receivebuffer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #a5c261;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_receivebuffer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">re</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Tuple</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_receivebuffer </span><span class="s0">import </span><span class="s1">ReceiveBuffer</span>
+
+
+<span class="s0">def </span><span class="s1">test_receivebuffer</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">ReceiveBuffer</span><span class="s2">()</span>
+    <span class="s0">assert not </span><span class="s1">b</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s3">0</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;&quot;</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;123&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s3">3</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;123&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;123&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_at_most</span><span class="s2">(</span><span class="s3">2</span><span class="s2">) == </span><span class="s4">b&quot;12&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s3">1</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;3&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;3&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_at_most</span><span class="s2">(</span><span class="s3">10</span><span class="s2">) == </span><span class="s4">b&quot;3&quot;</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_at_most</span><span class="s2">(</span><span class="s3">10</span><span class="s2">) </span><span class="s0">is None</span>
+    <span class="s0">assert not </span><span class="s1">b</span>
+
+    <span class="s5">################################################################</span>
+    <span class="s5"># maybe_extract_until_next</span>
+    <span class="s5">################################################################</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;123</span><span class="s0">\n</span><span class="s4">456</span><span class="s0">\r\n</span><span class="s4">789</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() == </span><span class="s4">b&quot;123</span><span class="s0">\n</span><span class="s4">456</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;789</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() == </span><span class="s4">b&quot;789</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;&quot;</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;12</span><span class="s0">\r</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() </span><span class="s0">is None</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;12</span><span class="s0">\r</span><span class="s4">&quot;</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;345</span><span class="s0">\n\r</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() </span><span class="s0">is None</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;12</span><span class="s0">\r</span><span class="s4">345</span><span class="s0">\n\r</span><span class="s4">&quot;</span>
+
+    <span class="s5"># here we stopped at the middle of b&quot;\r\n&quot; delimiter</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;</span><span class="s0">\n</span><span class="s4">6789aaa123</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() == </span><span class="s4">b&quot;12</span><span class="s0">\r</span><span class="s4">345</span><span class="s0">\n\r\n</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() == </span><span class="s4">b&quot;6789aaa123</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_next_line</span><span class="s2">() </span><span class="s0">is None</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;&quot;</span>
+
+    <span class="s5">################################################################</span>
+    <span class="s5"># maybe_extract_lines</span>
+    <span class="s5">################################################################</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;123</span><span class="s0">\r\n</span><span class="s4">a: b</span><span class="s0">\r\n</span><span class="s4">foo:bar</span><span class="s0">\r\n\r\n</span><span class="s4">trailing&quot;</span>
+    <span class="s1">lines </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_lines</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">lines </span><span class="s2">== [</span><span class="s4">b&quot;123&quot;</span><span class="s2">, </span><span class="s4">b&quot;a: b&quot;</span><span class="s2">, </span><span class="s4">b&quot;foo:bar&quot;</span><span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;trailing&quot;</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_lines</span><span class="s2">() </span><span class="s0">is None</span>
+
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;</span><span class="s0">\r\n\r</span><span class="s4">&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_lines</span><span class="s2">() </span><span class="s0">is None</span>
+
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_at_most</span><span class="s2">(</span><span class="s3">100</span><span class="s2">) == </span><span class="s4">b&quot;trailing</span><span class="s0">\r\n\r</span><span class="s4">&quot;</span>
+    <span class="s0">assert not </span><span class="s1">b</span>
+
+    <span class="s5"># Empty body case (as happens at the end of chunked encoding if there are</span>
+    <span class="s5"># no trailing headers, e.g.)</span>
+    <span class="s1">b </span><span class="s2">+= </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">trailing&quot;</span>
+    <span class="s0">assert </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_lines</span><span class="s2">() == []</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;trailing&quot;</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s6">&quot;data&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">param</span><span class="s2">(</span>
+            <span class="s2">(</span>
+                <span class="s4">b&quot;HTTP/1.1 200 OK</span><span class="s0">\r\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Content-type: text/plain</span><span class="s0">\r\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Connection: close</span><span class="s0">\r\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Some body&quot;</span><span class="s2">,</span>
+            <span class="s2">),</span>
+            <span class="s1">id</span><span class="s2">=</span><span class="s6">&quot;with_crlf_delimiter&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">param</span><span class="s2">(</span>
+            <span class="s2">(</span>
+                <span class="s4">b&quot;HTTP/1.1 200 OK</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Content-type: text/plain</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Connection: close</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Some body&quot;</span><span class="s2">,</span>
+            <span class="s2">),</span>
+            <span class="s1">id</span><span class="s2">=</span><span class="s6">&quot;with_lf_only_delimiter&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+        <span class="s1">pytest</span><span class="s2">.</span><span class="s1">param</span><span class="s2">(</span>
+            <span class="s2">(</span>
+                <span class="s4">b&quot;HTTP/1.1 200 OK</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Content-type: text/plain</span><span class="s0">\r\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Connection: close</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+                <span class="s4">b&quot;Some body&quot;</span><span class="s2">,</span>
+            <span class="s2">),</span>
+            <span class="s1">id</span><span class="s2">=</span><span class="s6">&quot;with_mixed_crlf_and_lf&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_receivebuffer_for_invalid_delimiter</span><span class="s2">(</span><span class="s1">data</span><span class="s2">: </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">]) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">b </span><span class="s2">= </span><span class="s1">ReceiveBuffer</span><span class="s2">()</span>
+
+    <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">data</span><span class="s2">:</span>
+        <span class="s1">b </span><span class="s2">+= </span><span class="s1">line</span>
+
+    <span class="s1">lines </span><span class="s2">= </span><span class="s1">b</span><span class="s2">.</span><span class="s1">maybe_extract_lines</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">lines </span><span class="s2">== [</span>
+        <span class="s4">b&quot;HTTP/1.1 200 OK&quot;</span><span class="s2">,</span>
+        <span class="s4">b&quot;Content-type: text/plain&quot;</span><span class="s2">,</span>
+        <span class="s4">b&quot;Connection: close&quot;</span><span class="s2">,</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">b</span><span class="s2">) == </span><span class="s4">b&quot;Some body&quot;</span>
+</pre>
+</body>
+</html>

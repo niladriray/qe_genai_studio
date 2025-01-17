@@ -1,0 +1,532 @@
+<html>
+<head>
+<title>index.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #a5c261;}
+.s7 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+index.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (C) 2013-2023 Vinay Sajip.</span>
+<span class="s0"># Licensed to the Python Software Foundation under a contributor agreement.</span>
+<span class="s0"># See LICENSE.txt and CONTRIBUTORS.txt.</span>
+<span class="s0">#</span>
+<span class="s2">import </span><span class="s1">hashlib</span>
+<span class="s2">import </span><span class="s1">logging</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">shutil</span>
+<span class="s2">import </span><span class="s1">subprocess</span>
+<span class="s2">import </span><span class="s1">tempfile</span>
+<span class="s2">try</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">threading </span><span class="s2">import </span><span class="s1">Thread</span>
+<span class="s2">except </span><span class="s1">ImportError</span><span class="s3">:  </span><span class="s0"># pragma: no cover</span>
+    <span class="s2">from </span><span class="s1">dummy_threading </span><span class="s2">import </span><span class="s1">Thread</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">DistlibException</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">compat </span><span class="s2">import </span><span class="s3">(</span><span class="s1">HTTPBasicAuthHandler</span><span class="s3">, </span><span class="s1">Request</span><span class="s3">, </span><span class="s1">HTTPPasswordMgr</span><span class="s3">,</span>
+                     <span class="s1">urlparse</span><span class="s3">, </span><span class="s1">build_opener</span><span class="s3">, </span><span class="s1">string_types</span><span class="s3">)</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">zip_dir</span><span class="s3">, </span><span class="s1">ServerProxy</span>
+
+<span class="s1">logger </span><span class="s3">= </span><span class="s1">logging</span><span class="s3">.</span><span class="s1">getLogger</span><span class="s3">(</span><span class="s1">__name__</span><span class="s3">)</span>
+
+<span class="s1">DEFAULT_INDEX </span><span class="s3">= </span><span class="s4">'https://pypi.org/pypi'</span>
+<span class="s1">DEFAULT_REALM </span><span class="s3">= </span><span class="s4">'pypi'</span>
+
+
+<span class="s2">class </span><span class="s1">PackageIndex</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    This class represents a package index compatible with PyPI, the Python 
+    Package Index. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">boundary </span><span class="s3">= </span><span class="s6">b'----------ThIs_Is_tHe_distlib_index_bouNdaRY_$'</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">url</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Initialise an instance. 
+ 
+        :param url: The URL of the index. If not specified, the URL for PyPI is 
+                    used. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">url </span><span class="s3">= </span><span class="s1">url </span><span class="s2">or </span><span class="s1">DEFAULT_INDEX</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">read_configuration</span><span class="s3">()</span>
+        <span class="s1">scheme</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">path</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, </span><span class="s1">query</span><span class="s3">, </span><span class="s1">frag </span><span class="s3">= </span><span class="s1">urlparse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">params </span><span class="s2">or </span><span class="s1">query </span><span class="s2">or </span><span class="s1">frag </span><span class="s2">or </span><span class="s1">scheme </span><span class="s2">not in </span><span class="s3">(</span><span class="s4">'http'</span><span class="s3">, </span><span class="s4">'https'</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'invalid repository: %s' </span><span class="s3">% </span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">password_handler </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">ssl_verifier </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">gpg </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">gpg_home </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">devnull</span><span class="s3">, </span><span class="s4">'w'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">sink</span><span class="s3">:</span>
+            <span class="s0"># Use gpg by default rather than gpg2, as gpg2 insists on</span>
+            <span class="s0"># prompting for passwords</span>
+            <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'gpg'</span><span class="s3">, </span><span class="s4">'gpg2'</span><span class="s3">):</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">rc </span><span class="s3">= </span><span class="s1">subprocess</span><span class="s3">.</span><span class="s1">check_call</span><span class="s3">([</span><span class="s1">s</span><span class="s3">, </span><span class="s4">'--version'</span><span class="s3">], </span><span class="s1">stdout</span><span class="s3">=</span><span class="s1">sink</span><span class="s3">,</span>
+                                               <span class="s1">stderr</span><span class="s3">=</span><span class="s1">sink</span><span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">rc </span><span class="s3">== </span><span class="s7">0</span><span class="s3">:</span>
+                        <span class="s1">self</span><span class="s3">.</span><span class="s1">gpg </span><span class="s3">= </span><span class="s1">s</span>
+                        <span class="s2">break</span>
+                <span class="s2">except </span><span class="s1">OSError</span><span class="s3">:</span>
+                    <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">_get_pypirc_command</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Get the distutils command for interacting with PyPI configurations. 
+        :return: the command. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">_get_pypirc_command </span><span class="s2">as </span><span class="s1">cmd</span>
+        <span class="s2">return </span><span class="s1">cmd</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">read_configuration</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Read the PyPI access configuration as supported by distutils. This populates 
+        ``username``, ``password``, ``realm`` and ``url`` attributes from the 
+        configuration. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">_load_pypirc</span>
+        <span class="s1">cfg </span><span class="s3">= </span><span class="s1">_load_pypirc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">username </span><span class="s3">= </span><span class="s1">cfg</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'username'</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">password </span><span class="s3">= </span><span class="s1">cfg</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'password'</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">realm </span><span class="s3">= </span><span class="s1">cfg</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'realm'</span><span class="s3">, </span><span class="s4">'pypi'</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">url </span><span class="s3">= </span><span class="s1">cfg</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'repository'</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">save_configuration</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Save the PyPI access configuration. You must have set ``username`` and 
+        ``password`` attributes before calling this method. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">check_credentials</span><span class="s3">()</span>
+        <span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">_store_pypirc</span>
+        <span class="s1">_store_pypirc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">check_credentials</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Check that ``username`` and ``password`` have been set, and raise an 
+        exception if not. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">username </span><span class="s2">is None or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">password </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'username and password must be set'</span><span class="s3">)</span>
+        <span class="s1">pm </span><span class="s3">= </span><span class="s1">HTTPPasswordMgr</span><span class="s3">()</span>
+        <span class="s1">_</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_ </span><span class="s3">= </span><span class="s1">urlparse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">)</span>
+        <span class="s1">pm</span><span class="s3">.</span><span class="s1">add_password</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">realm</span><span class="s3">, </span><span class="s1">netloc</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">username</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">password</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">password_handler </span><span class="s3">= </span><span class="s1">HTTPBasicAuthHandler</span><span class="s3">(</span><span class="s1">pm</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">register</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):  </span><span class="s0"># pragma: no cover</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Register a distribution on PyPI, using the provided metadata. 
+ 
+        :param metadata: A :class:`Metadata` instance defining at least a name 
+                         and version number for the distribution to be 
+                         registered. 
+        :return: The HTTP response received from PyPI upon submission of the 
+                request. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">check_credentials</span><span class="s3">()</span>
+        <span class="s1">metadata</span><span class="s3">.</span><span class="s1">validate</span><span class="s3">()</span>
+        <span class="s1">d </span><span class="s3">= </span><span class="s1">metadata</span><span class="s3">.</span><span class="s1">todict</span><span class="s3">()</span>
+        <span class="s1">d</span><span class="s3">[</span><span class="s4">':action'</span><span class="s3">] = </span><span class="s4">'verify'</span>
+        <span class="s1">request </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">encode_request</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">items</span><span class="s3">(), [])</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">request</span><span class="s3">)</span>
+        <span class="s1">d</span><span class="s3">[</span><span class="s4">':action'</span><span class="s3">] = </span><span class="s4">'submit'</span>
+        <span class="s1">request </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">encode_request</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">items</span><span class="s3">(), [])</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">request</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_reader</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">, </span><span class="s1">outbuf</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Thread runner for reading lines of from a subprocess into a buffer. 
+ 
+        :param name: The logical name of the stream (used for logging only). 
+        :param stream: The stream to read from. This will typically a pipe 
+                       connected to the output stream of a subprocess. 
+        :param outbuf: The list to append the read lines to. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">while True</span><span class="s3">:</span>
+            <span class="s1">s </span><span class="s3">= </span><span class="s1">stream</span><span class="s3">.</span><span class="s1">readline</span><span class="s3">()</span>
+            <span class="s2">if not </span><span class="s1">s</span><span class="s3">:</span>
+                <span class="s2">break</span>
+            <span class="s1">s </span><span class="s3">= </span><span class="s1">s</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">).</span><span class="s1">rstrip</span><span class="s3">()</span>
+            <span class="s1">outbuf</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)</span>
+            <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'%s: %s' </span><span class="s3">% (</span><span class="s1">name</span><span class="s3">, </span><span class="s1">s</span><span class="s3">))</span>
+        <span class="s1">stream</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">get_sign_command</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">, </span><span class="s1">signer</span><span class="s3">, </span><span class="s1">sign_password</span><span class="s3">, </span><span class="s1">keystore</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):  </span><span class="s0"># pragma: no cover</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Return a suitable command for signing a file. 
+ 
+        :param filename: The pathname to the file to be signed. 
+        :param signer: The identifier of the signer of the file. 
+        :param sign_password: The passphrase for the signer's 
+                              private key used for signing. 
+        :param keystore: The path to a directory which contains the keys 
+                         used in verification. If not specified, the 
+                         instance's ``gpg_home`` attribute is used instead. 
+        :return: The signing command as a list suitable to be 
+                 passed to :class:`subprocess.Popen`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cmd </span><span class="s3">= [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg</span><span class="s3">, </span><span class="s4">'--status-fd'</span><span class="s3">, </span><span class="s4">'2'</span><span class="s3">, </span><span class="s4">'--no-tty'</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">keystore </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">keystore </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg_home</span>
+        <span class="s2">if </span><span class="s1">keystore</span><span class="s3">:</span>
+            <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">([</span><span class="s4">'--homedir'</span><span class="s3">, </span><span class="s1">keystore</span><span class="s3">])</span>
+        <span class="s2">if </span><span class="s1">sign_password </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">([</span><span class="s4">'--batch'</span><span class="s3">, </span><span class="s4">'--passphrase-fd'</span><span class="s3">, </span><span class="s4">'0'</span><span class="s3">])</span>
+        <span class="s1">td </span><span class="s3">= </span><span class="s1">tempfile</span><span class="s3">.</span><span class="s1">mkdtemp</span><span class="s3">()</span>
+        <span class="s1">sf </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">td</span><span class="s3">, </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">basename</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">) + </span><span class="s4">'.asc'</span><span class="s3">)</span>
+        <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">([</span><span class="s4">'--detach-sign'</span><span class="s3">, </span><span class="s4">'--armor'</span><span class="s3">, </span><span class="s4">'--local-user'</span><span class="s3">,</span>
+                    <span class="s1">signer</span><span class="s3">, </span><span class="s4">'--output'</span><span class="s3">, </span><span class="s1">sf</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">])</span>
+        <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'invoking: %s'</span><span class="s3">, </span><span class="s4">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">))</span>
+        <span class="s2">return </span><span class="s1">cmd</span><span class="s3">, </span><span class="s1">sf</span>
+
+    <span class="s2">def </span><span class="s1">run_command</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cmd</span><span class="s3">, </span><span class="s1">input_data</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Run a command in a child process , passing it any input data specified. 
+ 
+        :param cmd: The command to run. 
+        :param input_data: If specified, this must be a byte string containing 
+                           data to be sent to the child process. 
+        :return: A tuple consisting of the subprocess' exit code, a list of 
+                 lines read from the subprocess' ``stdout``, and a list of 
+                 lines read from the subprocess' ``stderr``. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">kwargs </span><span class="s3">= {</span>
+            <span class="s4">'stdout'</span><span class="s3">: </span><span class="s1">subprocess</span><span class="s3">.</span><span class="s1">PIPE</span><span class="s3">,</span>
+            <span class="s4">'stderr'</span><span class="s3">: </span><span class="s1">subprocess</span><span class="s3">.</span><span class="s1">PIPE</span><span class="s3">,</span>
+        <span class="s3">}</span>
+        <span class="s2">if </span><span class="s1">input_data </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">kwargs</span><span class="s3">[</span><span class="s4">'stdin'</span><span class="s3">] = </span><span class="s1">subprocess</span><span class="s3">.</span><span class="s1">PIPE</span>
+        <span class="s1">stdout </span><span class="s3">= []</span>
+        <span class="s1">stderr </span><span class="s3">= []</span>
+        <span class="s1">p </span><span class="s3">= </span><span class="s1">subprocess</span><span class="s3">.</span><span class="s1">Popen</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+        <span class="s0"># We don't use communicate() here because we may need to</span>
+        <span class="s0"># get clever with interacting with the command</span>
+        <span class="s1">t1 </span><span class="s3">= </span><span class="s1">Thread</span><span class="s3">(</span><span class="s1">target</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_reader</span><span class="s3">, </span><span class="s1">args</span><span class="s3">=(</span><span class="s4">'stdout'</span><span class="s3">, </span><span class="s1">p</span><span class="s3">.</span><span class="s1">stdout</span><span class="s3">, </span><span class="s1">stdout</span><span class="s3">))</span>
+        <span class="s1">t1</span><span class="s3">.</span><span class="s1">start</span><span class="s3">()</span>
+        <span class="s1">t2 </span><span class="s3">= </span><span class="s1">Thread</span><span class="s3">(</span><span class="s1">target</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_reader</span><span class="s3">, </span><span class="s1">args</span><span class="s3">=(</span><span class="s4">'stderr'</span><span class="s3">, </span><span class="s1">p</span><span class="s3">.</span><span class="s1">stderr</span><span class="s3">, </span><span class="s1">stderr</span><span class="s3">))</span>
+        <span class="s1">t2</span><span class="s3">.</span><span class="s1">start</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">input_data </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">p</span><span class="s3">.</span><span class="s1">stdin</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">input_data</span><span class="s3">)</span>
+            <span class="s1">p</span><span class="s3">.</span><span class="s1">stdin</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+        <span class="s1">p</span><span class="s3">.</span><span class="s1">wait</span><span class="s3">()</span>
+        <span class="s1">t1</span><span class="s3">.</span><span class="s1">join</span><span class="s3">()</span>
+        <span class="s1">t2</span><span class="s3">.</span><span class="s1">join</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">p</span><span class="s3">.</span><span class="s1">returncode</span><span class="s3">, </span><span class="s1">stdout</span><span class="s3">, </span><span class="s1">stderr</span>
+
+    <span class="s2">def </span><span class="s1">sign_file</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">, </span><span class="s1">signer</span><span class="s3">, </span><span class="s1">sign_password</span><span class="s3">, </span><span class="s1">keystore</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):  </span><span class="s0"># pragma: no cover</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Sign a file. 
+ 
+        :param filename: The pathname to the file to be signed. 
+        :param signer: The identifier of the signer of the file. 
+        :param sign_password: The passphrase for the signer's 
+                              private key used for signing. 
+        :param keystore: The path to a directory which contains the keys 
+                         used in signing. If not specified, the instance's 
+                         ``gpg_home`` attribute is used instead. 
+        :return: The absolute pathname of the file where the signature is 
+                 stored. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cmd</span><span class="s3">, </span><span class="s1">sig_file </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_sign_command</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">, </span><span class="s1">signer</span><span class="s3">, </span><span class="s1">sign_password</span><span class="s3">,</span>
+                                              <span class="s1">keystore</span><span class="s3">)</span>
+        <span class="s1">rc</span><span class="s3">, </span><span class="s1">stdout</span><span class="s3">, </span><span class="s1">stderr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_command</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">,</span>
+                                              <span class="s1">sign_password</span><span class="s3">.</span><span class="s1">encode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">rc </span><span class="s3">!= </span><span class="s7">0</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'sign command failed with error '</span>
+                                   <span class="s4">'code %s' </span><span class="s3">% </span><span class="s1">rc</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">sig_file</span>
+
+    <span class="s2">def </span><span class="s1">upload_file</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">, </span><span class="s1">signer</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">sign_password</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+                    <span class="s1">filetype</span><span class="s3">=</span><span class="s4">'sdist'</span><span class="s3">, </span><span class="s1">pyversion</span><span class="s3">=</span><span class="s4">'source'</span><span class="s3">, </span><span class="s1">keystore</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Upload a release file to the index. 
+ 
+        :param metadata: A :class:`Metadata` instance defining at least a name 
+                         and version number for the file to be uploaded. 
+        :param filename: The pathname of the file to be uploaded. 
+        :param signer: The identifier of the signer of the file. 
+        :param sign_password: The passphrase for the signer's 
+                              private key used for signing. 
+        :param filetype: The type of the file being uploaded. This is the 
+                        distutils command which produced that file, e.g. 
+                        ``sdist`` or ``bdist_wheel``. 
+        :param pyversion: The version of Python which the release relates 
+                          to. For code compatible with any Python, this would 
+                          be ``source``, otherwise it would be e.g. ``3.2``. 
+        :param keystore: The path to a directory which contains the keys 
+                         used in signing. If not specified, the instance's 
+                         ``gpg_home`` attribute is used instead. 
+        :return: The HTTP response received from PyPI upon submission of the 
+                request. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">check_credentials</span><span class="s3">()</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'not found: %s' </span><span class="s3">% </span><span class="s1">filename</span><span class="s3">)</span>
+        <span class="s1">metadata</span><span class="s3">.</span><span class="s1">validate</span><span class="s3">()</span>
+        <span class="s1">d </span><span class="s3">= </span><span class="s1">metadata</span><span class="s3">.</span><span class="s1">todict</span><span class="s3">()</span>
+        <span class="s1">sig_file </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">signer</span><span class="s3">:</span>
+            <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg</span><span class="s3">:</span>
+                <span class="s1">logger</span><span class="s3">.</span><span class="s1">warning</span><span class="s3">(</span><span class="s4">'no signing program available - not signed'</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">sig_file </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sign_file</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">, </span><span class="s1">signer</span><span class="s3">, </span><span class="s1">sign_password</span><span class="s3">,</span>
+                                          <span class="s1">keystore</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">, </span><span class="s4">'rb'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+            <span class="s1">file_data </span><span class="s3">= </span><span class="s1">f</span><span class="s3">.</span><span class="s1">read</span><span class="s3">()</span>
+        <span class="s1">md5_digest </span><span class="s3">= </span><span class="s1">hashlib</span><span class="s3">.</span><span class="s1">md5</span><span class="s3">(</span><span class="s1">file_data</span><span class="s3">).</span><span class="s1">hexdigest</span><span class="s3">()</span>
+        <span class="s1">sha256_digest </span><span class="s3">= </span><span class="s1">hashlib</span><span class="s3">.</span><span class="s1">sha256</span><span class="s3">(</span><span class="s1">file_data</span><span class="s3">).</span><span class="s1">hexdigest</span><span class="s3">()</span>
+        <span class="s1">d</span><span class="s3">.</span><span class="s1">update</span><span class="s3">({</span>
+            <span class="s4">':action'</span><span class="s3">: </span><span class="s4">'file_upload'</span><span class="s3">,</span>
+            <span class="s4">'protocol_version'</span><span class="s3">: </span><span class="s4">'1'</span><span class="s3">,</span>
+            <span class="s4">'filetype'</span><span class="s3">: </span><span class="s1">filetype</span><span class="s3">,</span>
+            <span class="s4">'pyversion'</span><span class="s3">: </span><span class="s1">pyversion</span><span class="s3">,</span>
+            <span class="s4">'md5_digest'</span><span class="s3">: </span><span class="s1">md5_digest</span><span class="s3">,</span>
+            <span class="s4">'sha256_digest'</span><span class="s3">: </span><span class="s1">sha256_digest</span><span class="s3">,</span>
+        <span class="s3">})</span>
+        <span class="s1">files </span><span class="s3">= [(</span><span class="s4">'content'</span><span class="s3">, </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">basename</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">), </span><span class="s1">file_data</span><span class="s3">)]</span>
+        <span class="s2">if </span><span class="s1">sig_file</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">sig_file</span><span class="s3">, </span><span class="s4">'rb'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+                <span class="s1">sig_data </span><span class="s3">= </span><span class="s1">f</span><span class="s3">.</span><span class="s1">read</span><span class="s3">()</span>
+            <span class="s1">files</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s4">'gpg_signature'</span><span class="s3">, </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">basename</span><span class="s3">(</span><span class="s1">sig_file</span><span class="s3">),</span>
+                         <span class="s1">sig_data</span><span class="s3">))</span>
+            <span class="s1">shutil</span><span class="s3">.</span><span class="s1">rmtree</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">sig_file</span><span class="s3">))</span>
+        <span class="s1">request </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">encode_request</span><span class="s3">(</span><span class="s1">d</span><span class="s3">.</span><span class="s1">items</span><span class="s3">(), </span><span class="s1">files</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">request</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">upload_documentation</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">, </span><span class="s1">doc_dir</span><span class="s3">):  </span><span class="s0"># pragma: no cover</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Upload documentation to the index. 
+ 
+        :param metadata: A :class:`Metadata` instance defining at least a name 
+                         and version number for the documentation to be 
+                         uploaded. 
+        :param doc_dir: The pathname of the directory which contains the 
+                        documentation. This should be the directory that 
+                        contains the ``index.html`` for the documentation. 
+        :return: The HTTP response received from PyPI upon submission of the 
+                request. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">check_credentials</span><span class="s3">()</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isdir</span><span class="s3">(</span><span class="s1">doc_dir</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'not a directory: %r' </span><span class="s3">% </span><span class="s1">doc_dir</span><span class="s3">)</span>
+        <span class="s1">fn </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">doc_dir</span><span class="s3">, </span><span class="s4">'index.html'</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'not found: %r' </span><span class="s3">% </span><span class="s1">fn</span><span class="s3">)</span>
+        <span class="s1">metadata</span><span class="s3">.</span><span class="s1">validate</span><span class="s3">()</span>
+        <span class="s1">name</span><span class="s3">, </span><span class="s1">version </span><span class="s3">= </span><span class="s1">metadata</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">.</span><span class="s1">version</span>
+        <span class="s1">zip_data </span><span class="s3">= </span><span class="s1">zip_dir</span><span class="s3">(</span><span class="s1">doc_dir</span><span class="s3">).</span><span class="s1">getvalue</span><span class="s3">()</span>
+        <span class="s1">fields </span><span class="s3">= [(</span><span class="s4">':action'</span><span class="s3">, </span><span class="s4">'doc_upload'</span><span class="s3">),</span>
+                  <span class="s3">(</span><span class="s4">'name'</span><span class="s3">, </span><span class="s1">name</span><span class="s3">), (</span><span class="s4">'version'</span><span class="s3">, </span><span class="s1">version</span><span class="s3">)]</span>
+        <span class="s1">files </span><span class="s3">= [(</span><span class="s4">'content'</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">zip_data</span><span class="s3">)]</span>
+        <span class="s1">request </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">encode_request</span><span class="s3">(</span><span class="s1">fields</span><span class="s3">, </span><span class="s1">files</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">request</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">get_verify_command</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">signature_filename</span><span class="s3">, </span><span class="s1">data_filename</span><span class="s3">,</span>
+                           <span class="s1">keystore</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Return a suitable command for verifying a file. 
+ 
+        :param signature_filename: The pathname to the file containing the 
+                                   signature. 
+        :param data_filename: The pathname to the file containing the 
+                              signed data. 
+        :param keystore: The path to a directory which contains the keys 
+                         used in verification. If not specified, the 
+                         instance's ``gpg_home`` attribute is used instead. 
+        :return: The verifying command as a list suitable to be 
+                 passed to :class:`subprocess.Popen`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cmd </span><span class="s3">= [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg</span><span class="s3">, </span><span class="s4">'--status-fd'</span><span class="s3">, </span><span class="s4">'2'</span><span class="s3">, </span><span class="s4">'--no-tty'</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">keystore </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">keystore </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg_home</span>
+        <span class="s2">if </span><span class="s1">keystore</span><span class="s3">:</span>
+            <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">([</span><span class="s4">'--homedir'</span><span class="s3">, </span><span class="s1">keystore</span><span class="s3">])</span>
+        <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">([</span><span class="s4">'--verify'</span><span class="s3">, </span><span class="s1">signature_filename</span><span class="s3">, </span><span class="s1">data_filename</span><span class="s3">])</span>
+        <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'invoking: %s'</span><span class="s3">, </span><span class="s4">' '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">))</span>
+        <span class="s2">return </span><span class="s1">cmd</span>
+
+    <span class="s2">def </span><span class="s1">verify_signature</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">signature_filename</span><span class="s3">, </span><span class="s1">data_filename</span><span class="s3">,</span>
+                         <span class="s1">keystore</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Verify a signature for a file. 
+ 
+        :param signature_filename: The pathname to the file containing the 
+                                   signature. 
+        :param data_filename: The pathname to the file containing the 
+                              signed data. 
+        :param keystore: The path to a directory which contains the keys 
+                         used in verification. If not specified, the 
+                         instance's ``gpg_home`` attribute is used instead. 
+        :return: True if the signature was verified, else False. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">gpg</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'verification unavailable because gpg '</span>
+                                   <span class="s4">'unavailable'</span><span class="s3">)</span>
+        <span class="s1">cmd </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_verify_command</span><span class="s3">(</span><span class="s1">signature_filename</span><span class="s3">, </span><span class="s1">data_filename</span><span class="s3">,</span>
+                                      <span class="s1">keystore</span><span class="s3">)</span>
+        <span class="s1">rc</span><span class="s3">, </span><span class="s1">stdout</span><span class="s3">, </span><span class="s1">stderr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_command</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">rc </span><span class="s2">not in </span><span class="s3">(</span><span class="s7">0</span><span class="s3">, </span><span class="s7">1</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'verify command failed with error code %s' </span><span class="s3">% </span><span class="s1">rc</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">rc </span><span class="s3">== </span><span class="s7">0</span>
+
+    <span class="s2">def </span><span class="s1">download_file</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">url</span><span class="s3">, </span><span class="s1">destfile</span><span class="s3">, </span><span class="s1">digest</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">reporthook</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        This is a convenience method for downloading a file from an URL. 
+        Normally, this will be a file from the index, though currently 
+        no check is made for this (i.e. a file can be downloaded from 
+        anywhere). 
+ 
+        The method is just like the :func:`urlretrieve` function in the 
+        standard library, except that it allows digest computation to be 
+        done during download and checking that the downloaded data 
+        matched any expected value. 
+ 
+        :param url: The URL of the file to be downloaded (assumed to be 
+                    available via an HTTP GET request). 
+        :param destfile: The pathname where the downloaded file is to be 
+                         saved. 
+        :param digest: If specified, this must be a (hasher, value) 
+                       tuple, where hasher is the algorithm used (e.g. 
+                       ``'md5'``) and ``value`` is the expected value. 
+        :param reporthook: The same as for :func:`urlretrieve` in the 
+                           standard library. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">digest </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">digester </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'No digest specified'</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">digest</span><span class="s3">, (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+                <span class="s1">hasher</span><span class="s3">, </span><span class="s1">digest </span><span class="s3">= </span><span class="s1">digest</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">hasher </span><span class="s3">= </span><span class="s4">'md5'</span>
+            <span class="s1">digester </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">hashlib</span><span class="s3">, </span><span class="s1">hasher</span><span class="s3">)()</span>
+            <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'Digest specified: %s' </span><span class="s3">% </span><span class="s1">digest</span><span class="s3">)</span>
+        <span class="s0"># The following code is equivalent to urlretrieve.</span>
+        <span class="s0"># We need to do it this way so that we can compute the</span>
+        <span class="s0"># digest of the file as we go.</span>
+        <span class="s2">with </span><span class="s1">open</span><span class="s3">(</span><span class="s1">destfile</span><span class="s3">, </span><span class="s4">'wb'</span><span class="s3">) </span><span class="s2">as </span><span class="s1">dfp</span><span class="s3">:</span>
+            <span class="s0"># addinfourl is not a context manager on 2.x</span>
+            <span class="s0"># so we have to use try/finally</span>
+            <span class="s1">sfp </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">Request</span><span class="s3">(</span><span class="s1">url</span><span class="s3">))</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">headers </span><span class="s3">= </span><span class="s1">sfp</span><span class="s3">.</span><span class="s1">info</span><span class="s3">()</span>
+                <span class="s1">blocksize </span><span class="s3">= </span><span class="s7">8192</span>
+                <span class="s1">size </span><span class="s3">= -</span><span class="s7">1</span>
+                <span class="s1">read </span><span class="s3">= </span><span class="s7">0</span>
+                <span class="s1">blocknum </span><span class="s3">= </span><span class="s7">0</span>
+                <span class="s2">if </span><span class="s4">&quot;content-length&quot; </span><span class="s2">in </span><span class="s1">headers</span><span class="s3">:</span>
+                    <span class="s1">size </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">headers</span><span class="s3">[</span><span class="s4">&quot;Content-Length&quot;</span><span class="s3">])</span>
+                <span class="s2">if </span><span class="s1">reporthook</span><span class="s3">:</span>
+                    <span class="s1">reporthook</span><span class="s3">(</span><span class="s1">blocknum</span><span class="s3">, </span><span class="s1">blocksize</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+                <span class="s2">while True</span><span class="s3">:</span>
+                    <span class="s1">block </span><span class="s3">= </span><span class="s1">sfp</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">blocksize</span><span class="s3">)</span>
+                    <span class="s2">if not </span><span class="s1">block</span><span class="s3">:</span>
+                        <span class="s2">break</span>
+                    <span class="s1">read </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">block</span><span class="s3">)</span>
+                    <span class="s1">dfp</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">block</span><span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">digester</span><span class="s3">:</span>
+                        <span class="s1">digester</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">block</span><span class="s3">)</span>
+                    <span class="s1">blocknum </span><span class="s3">+= </span><span class="s7">1</span>
+                    <span class="s2">if </span><span class="s1">reporthook</span><span class="s3">:</span>
+                        <span class="s1">reporthook</span><span class="s3">(</span><span class="s1">blocknum</span><span class="s3">, </span><span class="s1">blocksize</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+            <span class="s2">finally</span><span class="s3">:</span>
+                <span class="s1">sfp</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+        <span class="s0"># check that we got the whole file, if we can</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s3">&gt;= </span><span class="s7">0 </span><span class="s2">and </span><span class="s1">read </span><span class="s3">&lt; </span><span class="s1">size</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span>
+                <span class="s4">'retrieval incomplete: got only %d out of %d bytes'</span>
+                <span class="s3">% (</span><span class="s1">read</span><span class="s3">, </span><span class="s1">size</span><span class="s3">))</span>
+        <span class="s0"># if we have a digest, it must match.</span>
+        <span class="s2">if </span><span class="s1">digester</span><span class="s3">:</span>
+            <span class="s1">actual </span><span class="s3">= </span><span class="s1">digester</span><span class="s3">.</span><span class="s1">hexdigest</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">digest </span><span class="s3">!= </span><span class="s1">actual</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">DistlibException</span><span class="s3">(</span><span class="s4">'%s digest mismatch for %s: expected '</span>
+                                       <span class="s4">'%s, got %s' </span><span class="s3">% (</span><span class="s1">hasher</span><span class="s3">, </span><span class="s1">destfile</span><span class="s3">,</span>
+                                                       <span class="s1">digest</span><span class="s3">, </span><span class="s1">actual</span><span class="s3">))</span>
+            <span class="s1">logger</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s4">'Digest verified: %s'</span><span class="s3">, </span><span class="s1">digest</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">send_request</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">req</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Send a standard library :class:`Request` to PyPI and return its 
+        response. 
+ 
+        :param req: The request to send. 
+        :return: The HTTP response from PyPI (a standard library HTTPResponse). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">handlers </span><span class="s3">= []</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">password_handler</span><span class="s3">:</span>
+            <span class="s1">handlers</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">password_handler</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ssl_verifier</span><span class="s3">:</span>
+            <span class="s1">handlers</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">ssl_verifier</span><span class="s3">)</span>
+        <span class="s1">opener </span><span class="s3">= </span><span class="s1">build_opener</span><span class="s3">(*</span><span class="s1">handlers</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">opener</span><span class="s3">.</span><span class="s1">open</span><span class="s3">(</span><span class="s1">req</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">encode_request</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fields</span><span class="s3">, </span><span class="s1">files</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Encode fields and files for posting to an HTTP server. 
+ 
+        :param fields: The fields to send as a list of (fieldname, value) 
+                       tuples. 
+        :param files: The files to send as a list of (fieldname, filename, 
+                      file_bytes) tuple. 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># Adapted from packaging, which in turn was adapted from</span>
+        <span class="s0"># http://code.activestate.com/recipes/146306</span>
+
+        <span class="s1">parts </span><span class="s3">= []</span>
+        <span class="s1">boundary </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">boundary</span>
+        <span class="s2">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">values </span><span class="s2">in </span><span class="s1">fields</span><span class="s3">:</span>
+            <span class="s2">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">values</span><span class="s3">, (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+                <span class="s1">values </span><span class="s3">= [</span><span class="s1">values</span><span class="s3">]</span>
+
+            <span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">values</span><span class="s3">:</span>
+                <span class="s1">parts</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span>
+                    <span class="s6">b'--' </span><span class="s3">+ </span><span class="s1">boundary</span><span class="s3">,</span>
+                    <span class="s3">(</span><span class="s4">'Content-Disposition: form-data; name=&quot;%s&quot;' </span><span class="s3">%</span>
+                     <span class="s1">k</span><span class="s3">).</span><span class="s1">encode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">),</span>
+                    <span class="s6">b''</span><span class="s3">,</span>
+                    <span class="s1">v</span><span class="s3">.</span><span class="s1">encode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">)))</span>
+        <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">files</span><span class="s3">:</span>
+            <span class="s1">parts</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span>
+                <span class="s6">b'--' </span><span class="s3">+ </span><span class="s1">boundary</span><span class="s3">,</span>
+                <span class="s3">(</span><span class="s4">'Content-Disposition: form-data; name=&quot;%s&quot;; filename=&quot;%s&quot;' </span><span class="s3">%</span>
+                 <span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">)).</span><span class="s1">encode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">),</span>
+                <span class="s6">b''</span><span class="s3">,</span>
+                <span class="s1">value</span><span class="s3">))</span>
+
+        <span class="s1">parts</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span><span class="s6">b'--' </span><span class="s3">+ </span><span class="s1">boundary </span><span class="s3">+ </span><span class="s6">b'--'</span><span class="s3">, </span><span class="s6">b''</span><span class="s3">))</span>
+
+        <span class="s1">body </span><span class="s3">= </span><span class="s6">b'</span><span class="s2">\r\n</span><span class="s6">'</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">parts</span><span class="s3">)</span>
+        <span class="s1">ct </span><span class="s3">= </span><span class="s6">b'multipart/form-data; boundary=' </span><span class="s3">+ </span><span class="s1">boundary</span>
+        <span class="s1">headers </span><span class="s3">= {</span>
+            <span class="s4">'Content-type'</span><span class="s3">: </span><span class="s1">ct</span><span class="s3">,</span>
+            <span class="s4">'Content-length'</span><span class="s3">: </span><span class="s1">str</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">body</span><span class="s3">))</span>
+        <span class="s3">}</span>
+        <span class="s2">return </span><span class="s1">Request</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">, </span><span class="s1">body</span><span class="s3">, </span><span class="s1">headers</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">search</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">terms</span><span class="s3">, </span><span class="s1">operator</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):  </span><span class="s0"># pragma: no cover</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">terms</span><span class="s3">, </span><span class="s1">string_types</span><span class="s3">):</span>
+            <span class="s1">terms </span><span class="s3">= {</span><span class="s4">'name'</span><span class="s3">: </span><span class="s1">terms</span><span class="s3">}</span>
+        <span class="s1">rpc_proxy </span><span class="s3">= </span><span class="s1">ServerProxy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">url</span><span class="s3">, </span><span class="s1">timeout</span><span class="s3">=</span><span class="s7">3.0</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">rpc_proxy</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">terms</span><span class="s3">, </span><span class="s1">operator </span><span class="s2">or </span><span class="s4">'and'</span><span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s1">rpc_proxy</span><span class="s3">(</span><span class="s4">'close'</span><span class="s3">)()</span>
+</pre>
+</body>
+</html>

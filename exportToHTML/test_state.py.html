@@ -1,0 +1,291 @@
+<html>
+<head>
+<title>test_state.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_state.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_events </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ConnectionClosed</span><span class="s2">,</span>
+    <span class="s1">Data</span><span class="s2">,</span>
+    <span class="s1">EndOfMessage</span><span class="s2">,</span>
+    <span class="s1">Event</span><span class="s2">,</span>
+    <span class="s1">InformationalResponse</span><span class="s2">,</span>
+    <span class="s1">Request</span><span class="s2">,</span>
+    <span class="s1">Response</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_state </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">_SWITCH_CONNECT</span><span class="s2">,</span>
+    <span class="s1">_SWITCH_UPGRADE</span><span class="s2">,</span>
+    <span class="s1">CLIENT</span><span class="s2">,</span>
+    <span class="s1">CLOSED</span><span class="s2">,</span>
+    <span class="s1">ConnectionState</span><span class="s2">,</span>
+    <span class="s1">DONE</span><span class="s2">,</span>
+    <span class="s1">IDLE</span><span class="s2">,</span>
+    <span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">,</span>
+    <span class="s1">MUST_CLOSE</span><span class="s2">,</span>
+    <span class="s1">SEND_BODY</span><span class="s2">,</span>
+    <span class="s1">SEND_RESPONSE</span><span class="s2">,</span>
+    <span class="s1">SERVER</span><span class="s2">,</span>
+    <span class="s1">SWITCHED_PROTOCOL</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">LocalProtocolError</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+
+    <span class="s3"># Basic event-triggered transitions</span>
+
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">}</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s3"># The SERVER-Request special case:</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s3"># Illegal transitions raise an error and nothing happens</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">}</span>
+
+    <span class="s3"># State-triggered transition</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_keep_alive</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># keep_alive = False</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_keep_alive_disabled</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_keep_alive_in_DONE</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># Check that if keep_alive is disabled when the CLIENT is already in DONE,</span>
+    <span class="s3"># then this is sufficient to immediately trigger the DONE -&gt; MUST_CLOSE</span>
+    <span class="s3"># transition</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_keep_alive_disabled</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_switch_denied</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">for </span><span class="s1">switch_type </span><span class="s0">in </span><span class="s2">(</span><span class="s1">_SWITCH_CONNECT</span><span class="s2">, </span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">deny_early </span><span class="s0">in </span><span class="s2">(</span><span class="s0">True</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+            <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">switch_type</span><span class="s2">)</span>
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+            <span class="s0">assert </span><span class="s1">switch_type </span><span class="s0">in </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">pending_switch_proposals</span>
+
+            <span class="s0">if </span><span class="s1">deny_early</span><span class="s2">:</span>
+                <span class="s3"># before client reaches DONE</span>
+                <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+                <span class="s0">assert not </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">pending_switch_proposals</span>
+
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">deny_early</span><span class="s2">:</span>
+                <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span>
+                    <span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">,</span>
+                    <span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">,</span>
+                <span class="s2">}</span>
+
+                <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">)</span>
+                <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span>
+                    <span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">,</span>
+                    <span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">,</span>
+                <span class="s2">}</span>
+
+                <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+                <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+                <span class="s0">assert not </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">pending_switch_proposals</span>
+
+
+<span class="s1">_response_type_for_switch </span><span class="s2">= {</span>
+    <span class="s1">_SWITCH_UPGRADE</span><span class="s2">: </span><span class="s1">InformationalResponse</span><span class="s2">,</span>
+    <span class="s1">_SWITCH_CONNECT</span><span class="s2">: </span><span class="s1">Response</span><span class="s2">,</span>
+    <span class="s0">None</span><span class="s2">: </span><span class="s1">Response</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_protocol_switch_accepted</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">for </span><span class="s1">switch_event </span><span class="s0">in </span><span class="s2">[</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">, </span><span class="s1">_SWITCH_CONNECT</span><span class="s2">]:</span>
+        <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">switch_event</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">_response_type_for_switch</span><span class="s2">[</span><span class="s1">switch_event</span><span class="s2">], </span><span class="s1">switch_event</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_double_protocol_switch</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># CONNECT + Upgrade is legal! Very silly, but legal. So we support</span>
+    <span class="s3"># it. Because sometimes doing the silly thing is easier than not.</span>
+    <span class="s0">for </span><span class="s1">server_switch </span><span class="s0">in </span><span class="s2">[</span><span class="s0">None</span><span class="s2">, </span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">, </span><span class="s1">_SWITCH_CONNECT</span><span class="s2">]:</span>
+        <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">_SWITCH_CONNECT</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span>
+            <span class="s1">SERVER</span><span class="s2">, </span><span class="s1">_response_type_for_switch</span><span class="s2">[</span><span class="s1">server_switch</span><span class="s2">], </span><span class="s1">server_switch</span>
+        <span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">server_switch </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_inconsistent_protocol_switch</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">for </span><span class="s1">client_switches</span><span class="s2">, </span><span class="s1">server_switch </span><span class="s0">in </span><span class="s2">[</span>
+        <span class="s2">([], </span><span class="s1">_SWITCH_CONNECT</span><span class="s2">),</span>
+        <span class="s2">([], </span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">),</span>
+        <span class="s2">([</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">], </span><span class="s1">_SWITCH_CONNECT</span><span class="s2">),</span>
+        <span class="s2">([</span><span class="s1">_SWITCH_CONNECT</span><span class="s2">], </span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">),</span>
+    <span class="s2">]:</span>
+        <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">client_switch </span><span class="s0">in </span><span class="s1">client_switches</span><span class="s2">:  </span><span class="s3"># type: ignore[attr-defined]</span>
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">client_switch</span><span class="s2">)</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">, </span><span class="s1">server_switch</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_keepalive_protocol_switch_interaction</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># keep_alive=False + pending_switch_proposals</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_keep_alive_disabled</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s3"># the protocol switch &quot;wins&quot;</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s3"># but when the server denies the request, keep_alive comes back into play</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_ConnectionState_reuse</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">}</span>
+
+    <span class="s3"># No keepalive</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_keep_alive_disabled</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s3"># One side closed</span>
+
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s3"># Succesful protocol switch</span>
+
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">, </span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">)</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s3"># Failed protocol switch</span>
+
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_client_switch_proposal</span><span class="s2">(</span><span class="s1">_SWITCH_UPGRADE</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">)</span>
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">)</span>
+
+    <span class="s1">cs</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">cs</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">IDLE</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_server_request_is_illegal</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># There used to be a bug in how we handled the Request special case that</span>
+    <span class="s3"># made this allowed...</span>
+    <span class="s1">cs </span><span class="s2">= </span><span class="s1">ConnectionState</span><span class="s2">()</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">cs</span><span class="s2">.</span><span class="s1">process_event</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Request</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

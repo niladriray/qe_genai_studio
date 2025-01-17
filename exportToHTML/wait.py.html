@@ -1,0 +1,175 @@
+<html>
+<head>
+<title>wait.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+wait.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">errno</span>
+<span class="s0">import </span><span class="s1">select</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">partial</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">time </span><span class="s0">import </span><span class="s1">monotonic</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">time </span><span class="s0">import </span><span class="s1">time </span><span class="s0">as </span><span class="s1">monotonic</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;NoWayToWaitForSocketError&quot;</span><span class="s2">, </span><span class="s3">&quot;wait_for_read&quot;</span><span class="s2">, </span><span class="s3">&quot;wait_for_write&quot;</span><span class="s2">]</span>
+
+
+<span class="s0">class </span><span class="s1">NoWayToWaitForSocketError</span><span class="s2">(</span><span class="s1">Exception</span><span class="s2">):</span>
+    <span class="s0">pass</span>
+
+
+<span class="s4"># How should we wait on sockets?</span>
+<span class="s4">#</span>
+<span class="s4"># There are two types of APIs you can use for waiting on sockets: the fancy</span>
+<span class="s4"># modern stateful APIs like epoll/kqueue, and the older stateless APIs like</span>
+<span class="s4"># select/poll. The stateful APIs are more efficient when you have a lots of</span>
+<span class="s4"># sockets to keep track of, because you can set them up once and then use them</span>
+<span class="s4"># lots of times. But we only ever want to wait on a single socket at a time</span>
+<span class="s4"># and don't want to keep track of state, so the stateless APIs are actually</span>
+<span class="s4"># more efficient. So we want to use select() or poll().</span>
+<span class="s4">#</span>
+<span class="s4"># Now, how do we choose between select() and poll()? On traditional Unixes,</span>
+<span class="s4"># select() has a strange calling convention that makes it slow, or fail</span>
+<span class="s4"># altogether, for high-numbered file descriptors. The point of poll() is to fix</span>
+<span class="s4"># that, so on Unixes, we prefer poll().</span>
+<span class="s4">#</span>
+<span class="s4"># On Windows, there is no poll() (or at least Python doesn't provide a wrapper</span>
+<span class="s4"># for it), but that's OK, because on Windows, select() doesn't have this</span>
+<span class="s4"># strange calling convention; plain select() works fine.</span>
+<span class="s4">#</span>
+<span class="s4"># So: on Windows we use select(), and everywhere else we use poll(). We also</span>
+<span class="s4"># fall back to select() in case poll() is somehow broken or missing.</span>
+
+<span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">5</span><span class="s2">):</span>
+    <span class="s4"># Modern Python, that retries syscalls by default</span>
+    <span class="s0">def </span><span class="s1">_retry_on_intr</span><span class="s2">(</span><span class="s1">fn</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">fn</span><span class="s2">(</span><span class="s1">timeout</span><span class="s2">)</span>
+
+<span class="s0">else</span><span class="s2">:</span>
+    <span class="s4"># Old and broken Pythons.</span>
+    <span class="s0">def </span><span class="s1">_retry_on_intr</span><span class="s2">(</span><span class="s1">fn</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">timeout </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">deadline </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;inf&quot;</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">deadline </span><span class="s2">= </span><span class="s1">monotonic</span><span class="s2">() + </span><span class="s1">timeout</span>
+
+        <span class="s0">while True</span><span class="s2">:</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">fn</span><span class="s2">(</span><span class="s1">timeout</span><span class="s2">)</span>
+            <span class="s4"># OSError for 3 &lt;= pyver &lt; 3.5, select.error for pyver &lt;= 2.7</span>
+            <span class="s0">except </span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">, </span><span class="s1">select</span><span class="s2">.</span><span class="s1">error</span><span class="s2">) </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+                <span class="s4"># 'e.args[0]' incantation works for both OSError and select.error</span>
+                <span class="s0">if </span><span class="s1">e</span><span class="s2">.</span><span class="s1">args</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] != </span><span class="s1">errno</span><span class="s2">.</span><span class="s1">EINTR</span><span class="s2">:</span>
+                    <span class="s0">raise</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">timeout </span><span class="s2">= </span><span class="s1">deadline </span><span class="s2">- </span><span class="s1">monotonic</span><span class="s2">()</span>
+                    <span class="s0">if </span><span class="s1">timeout </span><span class="s2">&lt; </span><span class="s5">0</span><span class="s2">:</span>
+                        <span class="s1">timeout </span><span class="s2">= </span><span class="s5">0</span>
+                    <span class="s0">if </span><span class="s1">timeout </span><span class="s2">== </span><span class="s1">float</span><span class="s2">(</span><span class="s3">&quot;inf&quot;</span><span class="s2">):</span>
+                        <span class="s1">timeout </span><span class="s2">= </span><span class="s0">None</span>
+                    <span class="s0">continue</span>
+
+
+<span class="s0">def </span><span class="s1">select_wait_for_socket</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">read</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">write</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s0">if not </span><span class="s1">read </span><span class="s0">and not </span><span class="s1">write</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;must specify at least one of read=True, write=True&quot;</span><span class="s2">)</span>
+    <span class="s1">rcheck </span><span class="s2">= []</span>
+    <span class="s1">wcheck </span><span class="s2">= []</span>
+    <span class="s0">if </span><span class="s1">read</span><span class="s2">:</span>
+        <span class="s1">rcheck</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">write</span><span class="s2">:</span>
+        <span class="s1">wcheck</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">)</span>
+    <span class="s4"># When doing a non-blocking connect, most systems signal success by</span>
+    <span class="s4"># marking the socket writable. Windows, though, signals success by marked</span>
+    <span class="s4"># it as &quot;exceptional&quot;. We paper over the difference by checking the write</span>
+    <span class="s4"># sockets for both conditions. (The stdlib selectors module does the same</span>
+    <span class="s4"># thing.)</span>
+    <span class="s1">fn </span><span class="s2">= </span><span class="s1">partial</span><span class="s2">(</span><span class="s1">select</span><span class="s2">.</span><span class="s1">select</span><span class="s2">, </span><span class="s1">rcheck</span><span class="s2">, </span><span class="s1">wcheck</span><span class="s2">, </span><span class="s1">wcheck</span><span class="s2">)</span>
+    <span class="s1">rready</span><span class="s2">, </span><span class="s1">wready</span><span class="s2">, </span><span class="s1">xready </span><span class="s2">= </span><span class="s1">_retry_on_intr</span><span class="s2">(</span><span class="s1">fn</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">rready </span><span class="s0">or </span><span class="s1">wready </span><span class="s0">or </span><span class="s1">xready</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">poll_wait_for_socket</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">read</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">write</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s0">if not </span><span class="s1">read </span><span class="s0">and not </span><span class="s1">write</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;must specify at least one of read=True, write=True&quot;</span><span class="s2">)</span>
+    <span class="s1">mask </span><span class="s2">= </span><span class="s5">0</span>
+    <span class="s0">if </span><span class="s1">read</span><span class="s2">:</span>
+        <span class="s1">mask </span><span class="s2">|= </span><span class="s1">select</span><span class="s2">.</span><span class="s1">POLLIN</span>
+    <span class="s0">if </span><span class="s1">write</span><span class="s2">:</span>
+        <span class="s1">mask </span><span class="s2">|= </span><span class="s1">select</span><span class="s2">.</span><span class="s1">POLLOUT</span>
+    <span class="s1">poll_obj </span><span class="s2">= </span><span class="s1">select</span><span class="s2">.</span><span class="s1">poll</span><span class="s2">()</span>
+    <span class="s1">poll_obj</span><span class="s2">.</span><span class="s1">register</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">mask</span><span class="s2">)</span>
+
+    <span class="s4"># For some reason, poll() takes timeout in milliseconds</span>
+    <span class="s0">def </span><span class="s1">do_poll</span><span class="s2">(</span><span class="s1">t</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">t </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">t </span><span class="s2">*= </span><span class="s5">1000</span>
+        <span class="s0">return </span><span class="s1">poll_obj</span><span class="s2">.</span><span class="s1">poll</span><span class="s2">(</span><span class="s1">t</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">_retry_on_intr</span><span class="s2">(</span><span class="s1">do_poll</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">null_wait_for_socket</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+    <span class="s0">raise </span><span class="s1">NoWayToWaitForSocketError</span><span class="s2">(</span><span class="s3">&quot;no select-equivalent available&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_have_working_poll</span><span class="s2">():</span>
+    <span class="s4"># Apparently some systems have a select.poll that fails as soon as you try</span>
+    <span class="s4"># to use it, either due to strange configuration or broken monkeypatching</span>
+    <span class="s4"># from libraries like eventlet/greenlet.</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">poll_obj </span><span class="s2">= </span><span class="s1">select</span><span class="s2">.</span><span class="s1">poll</span><span class="s2">()</span>
+        <span class="s1">_retry_on_intr</span><span class="s2">(</span><span class="s1">poll_obj</span><span class="s2">.</span><span class="s1">poll</span><span class="s2">, </span><span class="s5">0</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">, </span><span class="s1">OSError</span><span class="s2">):</span>
+        <span class="s0">return False</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">wait_for_socket</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+    <span class="s4"># We delay choosing which implementation to use until the first time we're</span>
+    <span class="s4"># called. We could do it at import time, but then we might make the wrong</span>
+    <span class="s4"># decision if someone goes wild with monkeypatching select.poll after</span>
+    <span class="s4"># we're imported.</span>
+    <span class="s0">global </span><span class="s1">wait_for_socket</span>
+    <span class="s0">if </span><span class="s1">_have_working_poll</span><span class="s2">():</span>
+        <span class="s1">wait_for_socket </span><span class="s2">= </span><span class="s1">poll_wait_for_socket</span>
+    <span class="s0">elif </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">select</span><span class="s2">, </span><span class="s3">&quot;select&quot;</span><span class="s2">):</span>
+        <span class="s1">wait_for_socket </span><span class="s2">= </span><span class="s1">select_wait_for_socket</span>
+    <span class="s0">else</span><span class="s2">:  </span><span class="s4"># Platform-specific: Appengine.</span>
+        <span class="s1">wait_for_socket </span><span class="s2">= </span><span class="s1">null_wait_for_socket</span>
+    <span class="s0">return </span><span class="s1">wait_for_socket</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">wait_for_read</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Waits for reading to be available on a given socket. 
+    Returns True if the socket is readable, or False if the timeout expired. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">wait_for_socket</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">read</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s1">timeout</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">wait_for_write</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Waits for writing to be available on a given socket. 
+    Returns True if the socket is readable, or False if the timeout expired. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">wait_for_socket</span><span class="s2">(</span><span class="s1">sock</span><span class="s2">, </span><span class="s1">write</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">=</span><span class="s1">timeout</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,371 @@
+<html>
+<head>
+<title>jsonpointer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #cf8e6d;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+jsonpointer.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># python-json-pointer - An implementation of the JSON Pointer syntax</span>
+<span class="s0"># https://github.com/stefankoegl/python-json-pointer</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (c) 2011 Stefan Kögl &lt;stefan@skoegl.net&gt;</span>
+<span class="s0"># All rights reserved.</span>
+<span class="s0">#</span>
+<span class="s0"># Redistribution and use in source and binary forms, with or without</span>
+<span class="s0"># modification, are permitted provided that the following conditions</span>
+<span class="s0"># are met:</span>
+<span class="s0">#</span>
+<span class="s0"># 1. Redistributions of source code must retain the above copyright</span>
+<span class="s0"># notice, this list of conditions and the following disclaimer.</span>
+<span class="s0"># 2. Redistributions in binary form must reproduce the above copyright</span>
+<span class="s0"># notice, this list of conditions and the following disclaimer in the</span>
+<span class="s0"># documentation and/or other materials provided with the distribution.</span>
+<span class="s0"># 3. The name of the author may not be used to endorse or promote products</span>
+<span class="s0"># derived from this software without specific prior written permission.</span>
+<span class="s0">#</span>
+<span class="s0"># THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR</span>
+<span class="s0"># IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES</span>
+<span class="s0"># OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.</span>
+<span class="s0"># IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,</span>
+<span class="s0"># INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT</span>
+<span class="s0"># NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,</span>
+<span class="s0"># DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY</span>
+<span class="s0"># THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT</span>
+<span class="s0"># (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF</span>
+<span class="s0"># THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</span>
+<span class="s0">#</span>
+
+<span class="s2">&quot;&quot;&quot; Identify specific nodes in a JSON document (RFC 6901) &quot;&quot;&quot;</span>
+
+<span class="s0"># Will be parsed by setup.py to determine package metadata</span>
+<span class="s1">__author__ </span><span class="s3">= </span><span class="s4">'Stefan Kögl &lt;stefan@skoegl.net&gt;'</span>
+<span class="s1">__version__ </span><span class="s3">= </span><span class="s4">'3.0.0'</span>
+<span class="s1">__website__ </span><span class="s3">= </span><span class="s4">'https://github.com/stefankoegl/python-json-pointer'</span>
+<span class="s1">__license__ </span><span class="s3">= </span><span class="s4">'Modified BSD License'</span>
+
+<span class="s5">import </span><span class="s1">copy</span>
+<span class="s5">import </span><span class="s1">re</span>
+<span class="s5">from </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">abc </span><span class="s5">import </span><span class="s1">Mapping</span><span class="s3">, </span><span class="s1">Sequence</span>
+<span class="s5">from </span><span class="s1">itertools </span><span class="s5">import </span><span class="s1">tee</span><span class="s3">, </span><span class="s1">chain</span>
+
+<span class="s1">_nothing </span><span class="s3">= </span><span class="s1">object</span><span class="s3">()</span>
+
+
+<span class="s5">def </span><span class="s1">set_pointer</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">pointer</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">inplace</span><span class="s3">=</span><span class="s5">True</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot;Resolves a pointer against doc and sets the value of the target within doc. 
+ 
+    With inplace set to true, doc is modified as long as pointer is not the 
+    root. 
+ 
+    &gt;&gt;&gt; obj = {'foo': {'anArray': [ {'prop': 44}], 'another prop': {'baz': 'A string' }}} 
+ 
+    &gt;&gt;&gt; set_pointer(obj, '/foo/anArray/0/prop', 55) == \ 
+    {'foo': {'another prop': {'baz': 'A string'}, 'anArray': [{'prop': 55}]}} 
+    True 
+ 
+    &gt;&gt;&gt; set_pointer(obj, '/foo/yet another prop', 'added prop') == \ 
+    {'foo': {'another prop': {'baz': 'A string'}, 'yet another prop': 'added prop', 'anArray': [{'prop': 55}]}} 
+    True 
+ 
+    &gt;&gt;&gt; obj = {'foo': {}} 
+    &gt;&gt;&gt; set_pointer(obj, '/foo/a%20b', 'x') == \ 
+    {'foo': {'a%20b': 'x' }} 
+    True 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">pointer </span><span class="s3">= </span><span class="s1">JsonPointer</span><span class="s3">(</span><span class="s1">pointer</span><span class="s3">)</span>
+    <span class="s5">return </span><span class="s1">pointer</span><span class="s3">.</span><span class="s1">set</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">inplace</span><span class="s3">)</span>
+
+
+<span class="s5">def </span><span class="s1">resolve_pointer</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">pointer</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">_nothing</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot; Resolves pointer against doc and returns the referenced object 
+ 
+    &gt;&gt;&gt; obj = {'foo': {'anArray': [ {'prop': 44}], 'another prop': {'baz': 'A string' }}, 'a%20b': 1, 'c d': 2} 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '') == obj 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/foo') == obj['foo'] 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/foo/another prop') == obj['foo']['another prop'] 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/foo/another prop/baz') == obj['foo']['another prop']['baz'] 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/foo/anArray/0') == obj['foo']['anArray'][0] 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/some/path', None) == None 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/a b', None) == None 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/a%20b') == 1 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/c d') == 2 
+    True 
+ 
+    &gt;&gt;&gt; resolve_pointer(obj, '/c%20d', None) == None 
+    True 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">pointer </span><span class="s3">= </span><span class="s1">JsonPointer</span><span class="s3">(</span><span class="s1">pointer</span><span class="s3">)</span>
+    <span class="s5">return </span><span class="s1">pointer</span><span class="s3">.</span><span class="s1">resolve</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">default</span><span class="s3">)</span>
+
+
+<span class="s5">def </span><span class="s1">pairwise</span><span class="s3">(</span><span class="s1">iterable</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot; Transforms a list to a list of tuples of adjacent items 
+ 
+    s -&gt; (s0,s1), (s1,s2), (s2, s3), ... 
+ 
+    &gt;&gt;&gt; list(pairwise([])) 
+    [] 
+ 
+    &gt;&gt;&gt; list(pairwise([1])) 
+    [] 
+ 
+    &gt;&gt;&gt; list(pairwise([1, 2, 3, 4])) 
+    [(1, 2), (2, 3), (3, 4)] 
+    &quot;&quot;&quot;</span>
+    <span class="s1">a</span><span class="s3">, </span><span class="s1">b </span><span class="s3">= </span><span class="s1">tee</span><span class="s3">(</span><span class="s1">iterable</span><span class="s3">)</span>
+    <span class="s5">for </span><span class="s1">_ </span><span class="s5">in </span><span class="s1">b</span><span class="s3">:</span>
+        <span class="s5">break</span>
+    <span class="s5">return </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">)</span>
+
+
+<span class="s5">class </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):</span>
+    <span class="s5">pass</span>
+
+
+<span class="s5">class </span><span class="s1">EndOfList</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot;Result of accessing element &quot;-&quot; of a list&quot;&quot;&quot;</span>
+
+    <span class="s5">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">list_</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">list_ </span><span class="s3">= </span><span class="s1">list_</span>
+
+    <span class="s5">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">return </span><span class="s4">'{cls}({lst})'</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">,</span>
+                                     <span class="s1">lst</span><span class="s3">=</span><span class="s1">repr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">list_</span><span class="s3">))</span>
+
+
+<span class="s5">class </span><span class="s1">JsonPointer</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot;A JSON Pointer that can reference parts of a JSON document&quot;&quot;&quot;</span>
+
+    <span class="s0"># Array indices must not contain:</span>
+    <span class="s0"># leading zeros, signs, spaces, decimals, etc</span>
+    <span class="s1">_RE_ARRAY_INDEX </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">'0|[1-9][0-9]*$'</span><span class="s3">)</span>
+    <span class="s1">_RE_INVALID_ESCAPE </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">'(~[^01]|~$)'</span><span class="s3">)</span>
+
+    <span class="s5">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">pointer</span><span class="s3">):</span>
+
+        <span class="s0"># validate escapes</span>
+        <span class="s1">invalid_escape </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_RE_INVALID_ESCAPE</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">pointer</span><span class="s3">)</span>
+        <span class="s5">if </span><span class="s1">invalid_escape</span><span class="s3">:</span>
+            <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">'Found invalid escape {}'</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span>
+                <span class="s1">invalid_escape</span><span class="s3">.</span><span class="s1">group</span><span class="s3">()))</span>
+
+        <span class="s1">parts </span><span class="s3">= </span><span class="s1">pointer</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">'/'</span><span class="s3">)</span>
+        <span class="s5">if </span><span class="s1">parts</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s6">0</span><span class="s3">) != </span><span class="s4">''</span><span class="s3">:</span>
+            <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">'Location must start with /'</span><span class="s3">)</span>
+
+        <span class="s1">parts </span><span class="s3">= [</span><span class="s1">unescape</span><span class="s3">(</span><span class="s1">part</span><span class="s3">) </span><span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">parts</span><span class="s3">]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">parts </span><span class="s3">= </span><span class="s1">parts</span>
+
+    <span class="s5">def </span><span class="s1">to_last</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Resolves ptr until the last step, returns (sub-doc, last-step)&quot;&quot;&quot;</span>
+
+        <span class="s5">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">:</span>
+            <span class="s5">return </span><span class="s1">doc</span><span class="s3">, </span><span class="s5">None</span>
+
+        <span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">]:</span>
+            <span class="s1">doc </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">walk</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">part</span><span class="s3">)</span>
+
+        <span class="s5">return </span><span class="s1">doc</span><span class="s3">, </span><span class="s1">JsonPointer</span><span class="s3">.</span><span class="s1">get_part</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">])</span>
+
+    <span class="s5">def </span><span class="s1">resolve</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s1">_nothing</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Resolves the pointer against doc and returns the referenced object&quot;&quot;&quot;</span>
+
+        <span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">:</span>
+
+            <span class="s5">try</span><span class="s3">:</span>
+                <span class="s1">doc </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">walk</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">part</span><span class="s3">)</span>
+            <span class="s5">except </span><span class="s1">JsonPointerException</span><span class="s3">:</span>
+                <span class="s5">if </span><span class="s1">default </span><span class="s5">is </span><span class="s1">_nothing</span><span class="s3">:</span>
+                    <span class="s5">raise</span>
+                <span class="s5">else</span><span class="s3">:</span>
+                    <span class="s5">return </span><span class="s1">default</span>
+
+        <span class="s5">return </span><span class="s1">doc</span>
+
+    <span class="s1">get </span><span class="s3">= </span><span class="s1">resolve</span>
+
+    <span class="s5">def </span><span class="s1">set</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">, </span><span class="s1">value</span><span class="s3">, </span><span class="s1">inplace</span><span class="s3">=</span><span class="s5">True</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Resolve the pointer against the doc and replace the target with value.&quot;&quot;&quot;</span>
+
+        <span class="s5">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">) == </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s5">if </span><span class="s1">inplace</span><span class="s3">:</span>
+                <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">'Cannot set root in place'</span><span class="s3">)</span>
+            <span class="s5">return </span><span class="s1">value</span>
+
+        <span class="s5">if not </span><span class="s1">inplace</span><span class="s3">:</span>
+            <span class="s1">doc </span><span class="s3">= </span><span class="s1">copy</span><span class="s3">.</span><span class="s1">deepcopy</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">)</span>
+
+        <span class="s3">(</span><span class="s1">parent</span><span class="s3">, </span><span class="s1">part</span><span class="s3">) = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">to_last</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">)</span>
+
+        <span class="s5">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">parent</span><span class="s3">, </span><span class="s1">Sequence</span><span class="s3">) </span><span class="s5">and </span><span class="s1">part </span><span class="s3">== </span><span class="s4">'-'</span><span class="s3">:</span>
+            <span class="s1">parent</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">value</span><span class="s3">)</span>
+        <span class="s5">else</span><span class="s3">:</span>
+            <span class="s1">parent</span><span class="s3">[</span><span class="s1">part</span><span class="s3">] = </span><span class="s1">value</span>
+
+        <span class="s5">return </span><span class="s1">doc</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s5">def </span><span class="s1">get_part</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">, </span><span class="s1">part</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Returns the next step in the correct type&quot;&quot;&quot;</span>
+
+        <span class="s5">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">Mapping</span><span class="s3">):</span>
+            <span class="s5">return </span><span class="s1">part</span>
+
+        <span class="s5">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">Sequence</span><span class="s3">):</span>
+
+            <span class="s5">if </span><span class="s1">part </span><span class="s3">== </span><span class="s4">'-'</span><span class="s3">:</span>
+                <span class="s5">return </span><span class="s1">part</span>
+
+            <span class="s5">if not </span><span class="s1">JsonPointer</span><span class="s3">.</span><span class="s1">_RE_ARRAY_INDEX</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">part</span><span class="s3">)):</span>
+                <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">&quot;'%s' is not a valid sequence index&quot; </span><span class="s3">% </span><span class="s1">part</span><span class="s3">)</span>
+
+            <span class="s5">return </span><span class="s1">int</span><span class="s3">(</span><span class="s1">part</span><span class="s3">)</span>
+
+        <span class="s5">elif </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s4">'__getitem__'</span><span class="s3">):</span>
+            <span class="s0"># Allow indexing via ducktyping</span>
+            <span class="s0"># if the target has defined __getitem__</span>
+            <span class="s5">return </span><span class="s1">part</span>
+
+        <span class="s5">else</span><span class="s3">:</span>
+            <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">&quot;Document '%s' does not support indexing, &quot;</span>
+                                       <span class="s4">&quot;must be mapping/sequence or support __getitem__&quot; </span><span class="s3">% </span><span class="s1">type</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">))</span>
+
+    <span class="s5">def </span><span class="s1">get_parts</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Returns the list of the parts. For example, JsonPointer('/a/b').get_parts() == ['a', 'b']&quot;&quot;&quot;</span>
+
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span>
+
+    <span class="s5">def </span><span class="s1">walk</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">, </span><span class="s1">part</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot; Walks one step in doc and returns the referenced part &quot;&quot;&quot;</span>
+
+        <span class="s1">part </span><span class="s3">= </span><span class="s1">JsonPointer</span><span class="s3">.</span><span class="s1">get_part</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">part</span><span class="s3">)</span>
+
+        <span class="s5">assert </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s4">'__getitem__'</span><span class="s3">), </span><span class="s4">&quot;invalid document type %s&quot; </span><span class="s3">% (</span><span class="s1">type</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">),)</span>
+
+        <span class="s5">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">, </span><span class="s1">Sequence</span><span class="s3">):</span>
+            <span class="s5">if </span><span class="s1">part </span><span class="s3">== </span><span class="s4">'-'</span><span class="s3">:</span>
+                <span class="s5">return </span><span class="s1">EndOfList</span><span class="s3">(</span><span class="s1">doc</span><span class="s3">)</span>
+
+            <span class="s5">try</span><span class="s3">:</span>
+                <span class="s5">return </span><span class="s1">doc</span><span class="s3">[</span><span class="s1">part</span><span class="s3">]</span>
+
+            <span class="s5">except </span><span class="s1">IndexError</span><span class="s3">:</span>
+                <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">&quot;index '%s' is out of bounds&quot; </span><span class="s3">% (</span><span class="s1">part</span><span class="s3">,))</span>
+
+        <span class="s0"># Else the object is a mapping or supports __getitem__(so assume custom indexing)</span>
+        <span class="s5">try</span><span class="s3">:</span>
+            <span class="s5">return </span><span class="s1">doc</span><span class="s3">[</span><span class="s1">part</span><span class="s3">]</span>
+
+        <span class="s5">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+            <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">&quot;member '%s' not found in %s&quot; </span><span class="s3">% (</span><span class="s1">part</span><span class="s3">, </span><span class="s1">doc</span><span class="s3">))</span>
+
+    <span class="s5">def </span><span class="s1">contains</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">ptr</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot; Returns True if self contains the given ptr &quot;&quot;&quot;</span>
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">[:</span><span class="s1">len</span><span class="s3">(</span><span class="s1">ptr</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">)] == </span><span class="s1">ptr</span><span class="s3">.</span><span class="s1">parts</span>
+
+    <span class="s5">def </span><span class="s1">__contains__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">item</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot; Returns True if self contains the given ptr &quot;&quot;&quot;</span>
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">contains</span><span class="s3">(</span><span class="s1">item</span><span class="s3">)</span>
+
+    <span class="s5">def </span><span class="s1">join</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">suffix</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot; Returns a new JsonPointer with the given suffix append to this ptr &quot;&quot;&quot;</span>
+        <span class="s5">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">suffix</span><span class="s3">, </span><span class="s1">JsonPointer</span><span class="s3">):</span>
+            <span class="s1">suffix_parts </span><span class="s3">= </span><span class="s1">suffix</span><span class="s3">.</span><span class="s1">parts</span>
+        <span class="s5">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">suffix</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">suffix_parts </span><span class="s3">= </span><span class="s1">JsonPointer</span><span class="s3">(</span><span class="s1">suffix</span><span class="s3">).</span><span class="s1">parts</span>
+        <span class="s5">else</span><span class="s3">:</span>
+            <span class="s1">suffix_parts </span><span class="s3">= </span><span class="s1">suffix</span>
+        <span class="s5">try</span><span class="s3">:</span>
+            <span class="s5">return </span><span class="s1">JsonPointer</span><span class="s3">.</span><span class="s1">from_parts</span><span class="s3">(</span><span class="s1">chain</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">, </span><span class="s1">suffix_parts</span><span class="s3">))</span>
+        <span class="s5">except</span><span class="s3">:  </span><span class="s0"># noqa E722</span>
+            <span class="s5">raise </span><span class="s1">JsonPointerException</span><span class="s3">(</span><span class="s4">&quot;Invalid suffix&quot;</span><span class="s3">)</span>
+
+    <span class="s5">def </span><span class="s1">__truediv__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">suffix</span><span class="s3">):  </span><span class="s0"># Python 3</span>
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">suffix</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s5">def </span><span class="s1">path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Returns the string representation of the pointer 
+ 
+        &gt;&gt;&gt; ptr = JsonPointer('/~0/0/~1').path == '/~0/0/~1' 
+        &quot;&quot;&quot;</span>
+        <span class="s1">parts </span><span class="s3">= [</span><span class="s1">escape</span><span class="s3">(</span><span class="s1">part</span><span class="s3">) </span><span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">]</span>
+        <span class="s5">return </span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s4">'/' </span><span class="s3">+ </span><span class="s1">part </span><span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">parts</span><span class="s3">)</span>
+
+    <span class="s5">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Compares a pointer to another object 
+ 
+        Pointers can be compared by comparing their strings (or splitted 
+        strings), because no two different parts can point to the same 
+        structure in an object (eg no different number representations) 
+        &quot;&quot;&quot;</span>
+
+        <span class="s5">if not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">JsonPointer</span><span class="s3">):</span>
+            <span class="s5">return False</span>
+
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts </span><span class="s3">== </span><span class="s1">other</span><span class="s3">.</span><span class="s1">parts</span>
+
+    <span class="s5">def </span><span class="s1">__hash__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">return </span><span class="s1">hash</span><span class="s3">(</span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">parts</span><span class="s3">))</span>
+
+    <span class="s5">def </span><span class="s1">__str__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">path</span>
+
+    <span class="s5">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">__name__ </span><span class="s3">+ </span><span class="s4">&quot;(&quot; </span><span class="s3">+ </span><span class="s1">repr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path</span><span class="s3">) + </span><span class="s4">&quot;)&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s5">def </span><span class="s1">from_parts</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">parts</span><span class="s3">):</span>
+        <span class="s2">&quot;&quot;&quot;Constructs a JsonPointer from a list of (unescaped) paths 
+ 
+        &gt;&gt;&gt; JsonPointer.from_parts(['a', '~', '/', 0]).path == '/a/~0/~1/0' 
+        True 
+        &quot;&quot;&quot;</span>
+        <span class="s1">parts </span><span class="s3">= [</span><span class="s1">escape</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">part</span><span class="s3">)) </span><span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">parts</span><span class="s3">]</span>
+        <span class="s1">ptr </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">(</span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s4">'/' </span><span class="s3">+ </span><span class="s1">part </span><span class="s5">for </span><span class="s1">part </span><span class="s5">in </span><span class="s1">parts</span><span class="s3">))</span>
+        <span class="s5">return </span><span class="s1">ptr</span>
+
+
+<span class="s5">def </span><span class="s1">escape</span><span class="s3">(</span><span class="s1">s</span><span class="s3">):</span>
+    <span class="s5">return </span><span class="s1">s</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s4">'~'</span><span class="s3">, </span><span class="s4">'~0'</span><span class="s3">).</span><span class="s1">replace</span><span class="s3">(</span><span class="s4">'/'</span><span class="s3">, </span><span class="s4">'~1'</span><span class="s3">)</span>
+
+
+<span class="s5">def </span><span class="s1">unescape</span><span class="s3">(</span><span class="s1">s</span><span class="s3">):</span>
+    <span class="s5">return </span><span class="s1">s</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s4">'~1'</span><span class="s3">, </span><span class="s4">'/'</span><span class="s3">).</span><span class="s1">replace</span><span class="s3">(</span><span class="s4">'~0'</span><span class="s3">, </span><span class="s4">'~'</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

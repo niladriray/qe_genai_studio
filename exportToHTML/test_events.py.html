@@ -1,0 +1,173 @@
+<html>
+<head>
+<title>test_events.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #a5c261;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_events.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">http </span><span class="s0">import </span><span class="s1">HTTPStatus</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s2">.. </span><span class="s0">import </span><span class="s1">_events</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_events </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ConnectionClosed</span><span class="s2">,</span>
+    <span class="s1">Data</span><span class="s2">,</span>
+    <span class="s1">EndOfMessage</span><span class="s2">,</span>
+    <span class="s1">Event</span><span class="s2">,</span>
+    <span class="s1">InformationalResponse</span><span class="s2">,</span>
+    <span class="s1">Request</span><span class="s2">,</span>
+    <span class="s1">Response</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">LocalProtocolError</span>
+
+
+<span class="s0">def </span><span class="s1">test_events</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s3"># Missing Host:</span>
+        <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">)], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span>
+        <span class="s2">)</span>
+    <span class="s3"># But this is okay (HTTP/1.0)</span>
+    <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">)], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)</span>
+    <span class="s3"># fields are normalized</span>
+    <span class="s0">assert </span><span class="s1">req</span><span class="s2">.</span><span class="s1">method </span><span class="s2">== </span><span class="s5">b&quot;GET&quot;</span>
+    <span class="s0">assert </span><span class="s1">req</span><span class="s2">.</span><span class="s1">target </span><span class="s2">== </span><span class="s5">b&quot;/&quot;</span>
+    <span class="s0">assert </span><span class="s1">req</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== [(</span><span class="s5">b&quot;a&quot;</span><span class="s2">, </span><span class="s5">b&quot;b&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">req</span><span class="s2">.</span><span class="s1">http_version </span><span class="s2">== </span><span class="s5">b&quot;1.0&quot;</span>
+
+    <span class="s3"># This is also okay -- has a Host (with weird capitalization, which is ok)</span>
+    <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+        <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+        <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+        <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;a&quot;</span><span class="s2">, </span><span class="s4">&quot;b&quot;</span><span class="s2">), (</span><span class="s4">&quot;hOSt&quot;</span><span class="s2">, </span><span class="s4">&quot;example.com&quot;</span><span class="s2">)],</span>
+        <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s3"># we normalize header capitalization</span>
+    <span class="s0">assert </span><span class="s1">req</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== [(</span><span class="s5">b&quot;a&quot;</span><span class="s2">, </span><span class="s5">b&quot;b&quot;</span><span class="s2">), (</span><span class="s5">b&quot;host&quot;</span><span class="s2">, </span><span class="s5">b&quot;example.com&quot;</span><span class="s2">)]</span>
+
+    <span class="s3"># Multiple host is bad too</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), (</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)],</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+    <span class="s3"># Even for HTTP/1.0</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), (</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)],</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s3"># Header values are validated</span>
+    <span class="s0">for </span><span class="s1">bad_char </span><span class="s0">in </span><span class="s4">&quot;</span><span class="s0">\x00\r\n\f\v</span><span class="s4">&quot;</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">req </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), (</span><span class="s4">&quot;Foo&quot;</span><span class="s2">, </span><span class="s4">&quot;asd&quot; </span><span class="s2">+ </span><span class="s1">bad_char</span><span class="s2">)],</span>
+                <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+    <span class="s3"># But for compatibility we allow non-whitespace control characters, even</span>
+    <span class="s3"># though they're forbidden by the spec.</span>
+    <span class="s1">Request</span><span class="s2">(</span>
+        <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+        <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+        <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">), (</span><span class="s4">&quot;Foo&quot;</span><span class="s2">, </span><span class="s4">&quot;asd</span><span class="s0">\x01\x02\x7f</span><span class="s4">&quot;</span><span class="s2">)],</span>
+        <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s3"># Request target is validated</span>
+    <span class="s0">for </span><span class="s1">bad_byte </span><span class="s0">in </span><span class="s5">b&quot;</span><span class="s0">\x00\x20\x7f\xee</span><span class="s5">&quot;</span><span class="s2">:</span>
+        <span class="s1">target </span><span class="s2">= </span><span class="s1">bytearray</span><span class="s2">(</span><span class="s5">b&quot;/&quot;</span><span class="s2">)</span>
+        <span class="s1">target</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">bad_byte</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s1">target</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span>
+            <span class="s2">)</span>
+
+    <span class="s3"># Request method is validated</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET / HTTP/1.1&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s1">target</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)],</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s1">ir </span><span class="s2">= </span><span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s6">100</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)])</span>
+    <span class="s0">assert </span><span class="s1">ir</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s6">100</span>
+    <span class="s0">assert </span><span class="s1">ir</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== [(</span><span class="s5">b&quot;host&quot;</span><span class="s2">, </span><span class="s5">b&quot;a&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">ir</span><span class="s2">.</span><span class="s1">http_version </span><span class="s2">== </span><span class="s5">b&quot;1.1&quot;</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s6">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;a&quot;</span><span class="s2">)])</span>
+
+    <span class="s1">resp </span><span class="s2">= </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s6">204</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s3"># type: ignore[arg-type]</span>
+    <span class="s0">assert </span><span class="s1">resp</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s6">204</span>
+    <span class="s0">assert </span><span class="s1">resp</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== []</span>
+    <span class="s0">assert </span><span class="s1">resp</span><span class="s2">.</span><span class="s1">http_version </span><span class="s2">== </span><span class="s5">b&quot;1.0&quot;</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">resp </span><span class="s2">= </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s6">100</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s3"># type: ignore[arg-type]</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s4">&quot;100&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s3"># type: ignore[arg-type]</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">b&quot;100&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s3"># type: ignore[arg-type]</span>
+
+    <span class="s1">d </span><span class="s2">= </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s5">b&quot;asdf&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">d</span><span class="s2">.</span><span class="s1">data </span><span class="s2">== </span><span class="s5">b&quot;asdf&quot;</span>
+
+    <span class="s1">eom </span><span class="s2">= </span><span class="s1">EndOfMessage</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">eom</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== []</span>
+
+    <span class="s1">cc </span><span class="s2">= </span><span class="s1">ConnectionClosed</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">cc</span><span class="s2">) == </span><span class="s4">&quot;ConnectionClosed()&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">test_intenum_status_code</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3"># https://github.com/python-hyper/h11/issues/72</span>
+
+    <span class="s1">r </span><span class="s2">= </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s1">HTTPStatus</span><span class="s2">.</span><span class="s1">OK</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s3"># type: ignore[arg-type]</span>
+    <span class="s0">assert </span><span class="s1">r</span><span class="s2">.</span><span class="s1">status_code </span><span class="s2">== </span><span class="s1">HTTPStatus</span><span class="s2">.</span><span class="s1">OK</span>
+    <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">r</span><span class="s2">.</span><span class="s1">status_code</span><span class="s2">) </span><span class="s0">is not </span><span class="s1">type</span><span class="s2">(</span><span class="s1">HTTPStatus</span><span class="s2">.</span><span class="s1">OK</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">r</span><span class="s2">.</span><span class="s1">status_code</span><span class="s2">) </span><span class="s0">is </span><span class="s1">int</span>
+
+
+<span class="s0">def </span><span class="s1">test_header_casing</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">r </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+        <span class="s1">method</span><span class="s2">=</span><span class="s4">&quot;GET&quot;</span><span class="s2">,</span>
+        <span class="s1">target</span><span class="s2">=</span><span class="s4">&quot;/&quot;</span><span class="s2">,</span>
+        <span class="s1">headers</span><span class="s2">=[(</span><span class="s4">&quot;Host&quot;</span><span class="s2">, </span><span class="s4">&quot;example.org&quot;</span><span class="s2">), (</span><span class="s4">&quot;Connection&quot;</span><span class="s2">, </span><span class="s4">&quot;keep-alive&quot;</span><span class="s2">)],</span>
+        <span class="s1">http_version</span><span class="s2">=</span><span class="s4">&quot;1.1&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">r</span><span class="s2">.</span><span class="s1">headers</span><span class="s2">) == </span><span class="s6">2</span>
+    <span class="s0">assert </span><span class="s1">r</span><span class="s2">.</span><span class="s1">headers</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] == (</span><span class="s5">b&quot;host&quot;</span><span class="s2">, </span><span class="s5">b&quot;example.org&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">r</span><span class="s2">.</span><span class="s1">headers </span><span class="s2">== [(</span><span class="s5">b&quot;host&quot;</span><span class="s2">, </span><span class="s5">b&quot;example.org&quot;</span><span class="s2">), (</span><span class="s5">b&quot;connection&quot;</span><span class="s2">, </span><span class="s5">b&quot;keep-alive&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">r</span><span class="s2">.</span><span class="s1">headers</span><span class="s2">.</span><span class="s1">raw_items</span><span class="s2">() == [</span>
+        <span class="s2">(</span><span class="s5">b&quot;Host&quot;</span><span class="s2">, </span><span class="s5">b&quot;example.org&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s5">b&quot;Connection&quot;</span><span class="s2">, </span><span class="s5">b&quot;keep-alive&quot;</span><span class="s2">),</span>
+    <span class="s2">]</span>
+</pre>
+</body>
+</html>

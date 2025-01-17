@@ -1,0 +1,122 @@
+<html>
+<head>
+<title>filepost.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #7a7e85;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+filepost.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">import </span><span class="s1">binascii</span>
+<span class="s0">import </span><span class="s1">codecs</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">from </span><span class="s1">io </span><span class="s0">import </span><span class="s1">BytesIO</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">fields </span><span class="s0">import </span><span class="s1">RequestField</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">packages </span><span class="s0">import </span><span class="s1">six</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">packages</span><span class="s2">.</span><span class="s1">six </span><span class="s0">import </span><span class="s1">b</span>
+
+<span class="s1">writer </span><span class="s2">= </span><span class="s1">codecs</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">)[</span><span class="s4">3</span><span class="s2">]</span>
+
+
+<span class="s0">def </span><span class="s1">choose_boundary</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Our embarrassingly-simple replacement for mimetools.choose_boundary. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">boundary </span><span class="s2">= </span><span class="s1">binascii</span><span class="s2">.</span><span class="s1">hexlify</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">urandom</span><span class="s2">(</span><span class="s4">16</span><span class="s2">))</span>
+    <span class="s0">if not </span><span class="s1">six</span><span class="s2">.</span><span class="s1">PY2</span><span class="s2">:</span>
+        <span class="s1">boundary </span><span class="s2">= </span><span class="s1">boundary</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">boundary</span>
+
+
+<span class="s0">def </span><span class="s1">iter_field_objects</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Iterate over fields. 
+ 
+    Supports list of (k, v) tuples and dicts, and lists of 
+    :class:`~urllib3.fields.RequestField`. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">):</span>
+        <span class="s1">i </span><span class="s2">= </span><span class="s1">six</span><span class="s2">.</span><span class="s1">iteritems</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">i </span><span class="s2">= </span><span class="s1">iter</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">)</span>
+
+    <span class="s0">for </span><span class="s1">field </span><span class="s0">in </span><span class="s1">i</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">field</span><span class="s2">, </span><span class="s1">RequestField</span><span class="s2">):</span>
+            <span class="s0">yield </span><span class="s1">field</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">yield </span><span class="s1">RequestField</span><span class="s2">.</span><span class="s1">from_tuples</span><span class="s2">(*</span><span class="s1">field</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">iter_fields</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    .. deprecated:: 1.6 
+ 
+    Iterate over fields. 
+ 
+    The addition of :class:`~urllib3.fields.RequestField` makes this function 
+    obsolete. Instead, use :func:`iter_field_objects`, which returns 
+    :class:`~urllib3.fields.RequestField` objects. 
+ 
+    Supports list of (k, v) tuples and dicts. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">, </span><span class="s1">dict</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s2">((</span><span class="s1">k</span><span class="s2">, </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">six</span><span class="s2">.</span><span class="s1">iteritems</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">))</span>
+
+    <span class="s0">return </span><span class="s2">((</span><span class="s1">k</span><span class="s2">, </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">fields</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">encode_multipart_formdata</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">, </span><span class="s1">boundary</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Encode a dictionary of ``fields`` using the multipart/form-data MIME format. 
+ 
+    :param fields: 
+        Dictionary of fields or list of (key, :class:`~urllib3.fields.RequestField`). 
+ 
+    :param boundary: 
+        If not specified, then a random boundary will be generated using 
+        :func:`urllib3.filepost.choose_boundary`. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">body </span><span class="s2">= </span><span class="s1">BytesIO</span><span class="s2">()</span>
+    <span class="s0">if </span><span class="s1">boundary </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">boundary </span><span class="s2">= </span><span class="s1">choose_boundary</span><span class="s2">()</span>
+
+    <span class="s0">for </span><span class="s1">field </span><span class="s0">in </span><span class="s1">iter_field_objects</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">):</span>
+        <span class="s1">body</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">b</span><span class="s2">(</span><span class="s3">&quot;--%s</span><span class="s0">\r\n</span><span class="s3">&quot; </span><span class="s2">% (</span><span class="s1">boundary</span><span class="s2">)))</span>
+
+        <span class="s1">writer</span><span class="s2">(</span><span class="s1">body</span><span class="s2">).</span><span class="s1">write</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">render_headers</span><span class="s2">())</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">int</span><span class="s2">):</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)  </span><span class="s6"># Backwards compatibility</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">data</span><span class="s2">, </span><span class="s1">six</span><span class="s2">.</span><span class="s1">text_type</span><span class="s2">):</span>
+            <span class="s1">writer</span><span class="s2">(</span><span class="s1">body</span><span class="s2">).</span><span class="s1">write</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">body</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s1">body</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s7">b&quot;</span><span class="s0">\r\n</span><span class="s7">&quot;</span><span class="s2">)</span>
+
+    <span class="s1">body</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">b</span><span class="s2">(</span><span class="s3">&quot;--%s--</span><span class="s0">\r\n</span><span class="s3">&quot; </span><span class="s2">% (</span><span class="s1">boundary</span><span class="s2">)))</span>
+
+    <span class="s1">content_type </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s3">&quot;multipart/form-data; boundary=%s&quot; </span><span class="s2">% </span><span class="s1">boundary</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">body</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">(), </span><span class="s1">content_type</span>
+</pre>
+</body>
+</html>

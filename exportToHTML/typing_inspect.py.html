@@ -1,0 +1,874 @@
+<html>
+<head>
+<title>typing_inspect.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+typing_inspect.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Defines experimental API for runtime inspection of types defined 
+in the standard &quot;typing&quot; module. 
+ 
+Example usage:: 
+    from typing_inspect import is_generic_type 
+&quot;&quot;&quot;</span>
+
+<span class="s2"># NOTE: This module must support Python 2.7 in addition to Python 3.x</span>
+
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">import </span><span class="s1">types</span>
+<span class="s3">import </span><span class="s1">typing</span>
+<span class="s3">import </span><span class="s1">typing_extensions</span>
+
+<span class="s3">from </span><span class="s1">mypy_extensions </span><span class="s3">import </span><span class="s1">_TypedDictMeta </span><span class="s3">as </span><span class="s1">_TypedDictMeta_Mypy</span>
+
+<span class="s2"># See comments in typing_extensions source on why the switch is at 3.9.2</span>
+<span class="s3">if </span><span class="s4">(</span><span class="s5">3</span><span class="s4">, </span><span class="s5">4</span><span class="s4">, </span><span class="s5">0</span><span class="s4">) &lt;= </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &lt; (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">9</span><span class="s4">, </span><span class="s5">2</span><span class="s4">):</span>
+    <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">_TypedDictMeta </span><span class="s3">as </span><span class="s1">_TypedDictMeta_TE</span>
+<span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">9</span><span class="s4">, </span><span class="s5">2</span><span class="s4">):</span>
+    <span class="s2"># Situation with typing_extensions.TypedDict is complicated.</span>
+    <span class="s2"># Use the one defined in typing_extentions, and if there is none,</span>
+    <span class="s2"># fall back to typing.</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">_TypedDictMeta </span><span class="s3">as </span><span class="s1">_TypedDictMeta_TE</span>
+    <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+        <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">_TypedDictMeta </span><span class="s3">as </span><span class="s1">_TypedDictMeta_TE</span>
+<span class="s3">else</span><span class="s4">:</span>
+    <span class="s2"># typing_extensions.TypedDict is a re-export from typing.</span>
+    <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TypedDict</span>
+    <span class="s1">_TypedDictMeta_TE </span><span class="s4">= </span><span class="s1">type</span><span class="s4">(</span><span class="s1">TypedDict</span><span class="s4">)</span>
+
+<span class="s1">NEW_TYPING </span><span class="s4">= </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">7</span><span class="s4">, </span><span class="s5">0</span><span class="s4">)  </span><span class="s2"># PEP 560</span>
+<span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+    <span class="s3">import </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc</span>
+
+<span class="s1">WITH_FINAL </span><span class="s4">= </span><span class="s3">True</span>
+<span class="s1">WITH_LITERAL </span><span class="s4">= </span><span class="s3">True</span>
+<span class="s1">WITH_CLASSVAR </span><span class="s4">= </span><span class="s3">True</span>
+<span class="s1">WITH_NEWTYPE </span><span class="s4">= </span><span class="s3">True</span>
+<span class="s1">LEGACY_TYPING </span><span class="s4">= </span><span class="s3">False</span>
+
+<span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s4">(</span>
+        <span class="s1">Generic</span><span class="s4">, </span><span class="s1">Callable</span><span class="s4">, </span><span class="s1">Union</span><span class="s4">, </span><span class="s1">TypeVar</span><span class="s4">, </span><span class="s1">ClassVar</span><span class="s4">, </span><span class="s1">Tuple</span><span class="s4">, </span><span class="s1">_GenericAlias</span><span class="s4">,</span>
+        <span class="s1">ForwardRef</span><span class="s4">, </span><span class="s1">NewType</span><span class="s4">,</span>
+    <span class="s4">)</span>
+    <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">Final</span><span class="s4">, </span><span class="s1">Literal</span>
+    <span class="s3">if </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">9</span><span class="s4">, </span><span class="s5">0</span><span class="s4">):</span>
+        <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">_SpecialGenericAlias</span>
+        <span class="s1">typingGenericAlias </span><span class="s4">= (</span><span class="s1">_GenericAlias</span><span class="s4">, </span><span class="s1">_SpecialGenericAlias</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">GenericAlias</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">typingGenericAlias </span><span class="s4">= (</span><span class="s1">_GenericAlias</span><span class="s4">,)</span>
+<span class="s3">else</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s4">(</span>
+        <span class="s1">Callable</span><span class="s4">, </span><span class="s1">CallableMeta</span><span class="s4">, </span><span class="s1">Union</span><span class="s4">, </span><span class="s1">Tuple</span><span class="s4">, </span><span class="s1">TupleMeta</span><span class="s4">, </span><span class="s1">TypeVar</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">,</span>
+        <span class="s1">_ForwardRef</span><span class="s4">,</span>
+    <span class="s4">)</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">_Union</span><span class="s4">, </span><span class="s1">_ClassVar</span>
+    <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+        <span class="s2"># support for very old typing module &lt;=3.5.3</span>
+        <span class="s1">_Union </span><span class="s4">= </span><span class="s1">type</span><span class="s4">(</span><span class="s1">Union</span><span class="s4">)</span>
+        <span class="s1">WITH_CLASSVAR </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s1">LEGACY_TYPING </span><span class="s4">= </span><span class="s3">True</span>
+
+    <span class="s3">try</span><span class="s4">:  </span><span class="s2"># python 3.6</span>
+        <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">_Final</span>
+    <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:  </span><span class="s2"># python 2.7</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">_Final</span>
+        <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+            <span class="s1">WITH_FINAL </span><span class="s4">= </span><span class="s3">False</span>
+
+    <span class="s3">try</span><span class="s4">:  </span><span class="s2"># python 3.6</span>
+        <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">Literal</span>
+    <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:  </span><span class="s2"># python 2.7</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Literal</span>
+        <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+            <span class="s1">WITH_LITERAL </span><span class="s4">= </span><span class="s3">False</span>
+
+    <span class="s3">try</span><span class="s4">:  </span><span class="s2"># python &lt; 3.5.2</span>
+        <span class="s3">from </span><span class="s1">typing_extensions </span><span class="s3">import </span><span class="s1">NewType</span>
+    <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">NewType</span>
+        <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+            <span class="s1">WITH_NEWTYPE </span><span class="s4">= </span><span class="s3">False</span>
+
+
+<span class="s3">def </span><span class="s1">_gorg</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;This function exists for compatibility with old typing versions.&quot;&quot;&quot;</span>
+    <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s6">'_gorg'</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">_gorg</span>
+    <span class="s3">while </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">cls </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__origin__</span>
+    <span class="s3">return </span><span class="s1">cls</span>
+
+
+<span class="s3">def </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the given type is a generic type. This includes Generic itself, but 
+    excludes special typing constructs such as Union, Tuple, Callable, ClassVar. 
+    Examples:: 
+ 
+        is_generic_type(int) == False 
+        is_generic_type(Union[int, str]) == False 
+        is_generic_type(Union[int, T]) == False 
+        is_generic_type(ClassVar[List[int]]) == False 
+        is_generic_type(Callable[..., T]) == False 
+ 
+        is_generic_type(Generic) == True 
+        is_generic_type(Generic[T]) == True 
+        is_generic_type(Iterable[int]) == True 
+        is_generic_type(Mapping) == True 
+        is_generic_type(MutableMapping[T, List[int]]) == True 
+        is_generic_type(Sequence[Union[str, bytes]]) == True 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">Generic</span><span class="s4">) </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">not in </span><span class="s4">(</span><span class="s1">Union</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">, </span><span class="s1">ClassVar</span><span class="s4">, </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">) </span><span class="s3">and not</span>
+            <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, (</span><span class="s1">CallableMeta</span><span class="s4">, </span><span class="s1">TupleMeta</span><span class="s4">)))</span>
+
+
+<span class="s3">def </span><span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type is a generic callable type, including subclasses 
+    excluding non-generic types and callables. 
+    Examples:: 
+ 
+        is_callable_type(int) == False 
+        is_callable_type(type) == False 
+        is_callable_type(Callable) == True 
+        is_callable_type(Callable[..., int]) == True 
+        is_callable_type(Callable[[int, int], Iterable[str]]) == True 
+        class MyClass(Callable[[int], int]): 
+            ... 
+        is_callable_type(MyClass) == True 
+ 
+    For more general tests use callable(), for more precise test 
+    (excluding subclasses) use:: 
+ 
+        get_origin(tp) is collections.abc.Callable  # Callable prior to Python 3.7 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Callable </span><span class="s3">or </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc</span><span class="s4">.</span><span class="s1">Callable </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">Generic</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">CallableMeta</span>
+
+
+<span class="s3">def </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type is a generic tuple type, including subclasses excluding 
+    non-generic classes. 
+    Examples:: 
+ 
+        is_tuple_type(int) == False 
+        is_tuple_type(tuple) == False 
+        is_tuple_type(Tuple) == True 
+        is_tuple_type(Tuple[str, int]) == True 
+        class MyClass(Tuple[str, int]): 
+            ... 
+        is_tuple_type(MyClass) == True 
+ 
+    For more general tests use issubclass(..., tuple), for more precise test 
+    (excluding subclasses) use:: 
+ 
+        get_origin(tp) is tuple  # Tuple prior to Python 3.7 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Tuple </span><span class="s3">or </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is </span><span class="s1">tuple </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">Generic</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">TupleMeta</span>
+
+
+<span class="s3">def </span><span class="s1">is_optional_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type is type(None), or is a direct union with it, such as Optional[T]. 
+ 
+    NOTE: this method inspects nested `Union` arguments but not `TypeVar` definition 
+    bounds and constraints. So it will return `False` if 
+     - `tp` is a `TypeVar` bound, or constrained to, an optional type 
+     - `tp` is a `Union` to a `TypeVar` bound or constrained to an optional type, 
+     - `tp` refers to a *nested* `Union` containing an optional type or one of the above. 
+ 
+    Users wishing to check for optionality in types relying on type variables might wish 
+    to use this method in combination with `get_constraints` and `get_bound` 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">tp </span><span class="s3">is </span><span class="s1">type</span><span class="s4">(</span><span class="s3">None</span><span class="s4">):  </span><span class="s2"># noqa</span>
+        <span class="s3">return True</span>
+    <span class="s3">elif </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">any</span><span class="s4">(</span><span class="s1">is_optional_type</span><span class="s4">(</span><span class="s1">tt</span><span class="s4">) </span><span class="s3">for </span><span class="s1">tt </span><span class="s3">in </span><span class="s1">get_args</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">evaluate</span><span class="s4">=</span><span class="s3">True</span><span class="s4">))</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">is_final_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type is a final type. Examples:: 
+ 
+        is_final_type(int) == False 
+        is_final_type(Final) == True 
+        is_final_type(Final[int]) == True 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Final </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is </span><span class="s1">Final</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">WITH_FINAL </span><span class="s3">and </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">_Final</span>
+
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s1">MaybeUnionType </span><span class="s4">= </span><span class="s1">types</span><span class="s4">.</span><span class="s1">UnionType</span>
+<span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+    <span class="s1">MaybeUnionType </span><span class="s4">= </span><span class="s3">None</span>
+
+
+<span class="s3">def </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type is a union type. Examples:: 
+ 
+        is_union_type(int) == False 
+        is_union_type(Union) == True 
+        is_union_type(Union[int, int]) == False 
+        is_union_type(Union[T, int]) == True 
+        is_union_type(int | int) == False 
+        is_union_type(T | int) == True 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Union </span><span class="s3">or</span>
+                <span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is </span><span class="s1">Union</span><span class="s4">) </span><span class="s3">or</span>
+                <span class="s4">(</span><span class="s1">MaybeUnionType </span><span class="s3">and </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">MaybeUnionType</span><span class="s4">)))</span>
+    <span class="s3">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">_Union</span>
+
+
+<span class="s1">LITERALS </span><span class="s4">= {</span><span class="s1">Literal</span><span class="s4">}</span>
+<span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">typing</span><span class="s4">, </span><span class="s6">&quot;Literal&quot;</span><span class="s4">):</span>
+    <span class="s1">LITERALS</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">typing</span><span class="s4">.</span><span class="s1">Literal</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">is_literal_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">in </span><span class="s1">LITERALS </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">in </span><span class="s1">LITERALS</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">WITH_LITERAL </span><span class="s3">and </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">type</span><span class="s4">(</span><span class="s1">Literal</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">is_typevar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type represents a type variable. Examples:: 
+ 
+        is_typevar(int) == False 
+        is_typevar(T) == True 
+        is_typevar(Union[T, int]) == False 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">TypeVar</span>
+
+
+<span class="s3">def </span><span class="s1">is_classvar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Test if the type represents a class variable. Examples:: 
+ 
+        is_classvar(int) == False 
+        is_classvar(ClassVar) == True 
+        is_classvar(ClassVar[int]) == True 
+        is_classvar(ClassVar[List[T]]) == True 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">ClassVar </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is </span><span class="s1">ClassVar</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">WITH_CLASSVAR</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">_ClassVar</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">is_new_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Tests if the type represents a distinct type. Examples:: 
+ 
+        is_new_type(int) == False 
+        is_new_type(NewType) == True 
+        is_new_type(NewType('Age', int)) == True 
+        is_new_type(NewType('Scores', List[Dict[str, float]])) == True 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if not </span><span class="s1">WITH_NEWTYPE</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+    <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">10</span><span class="s4">, </span><span class="s5">0</span><span class="s4">) </span><span class="s3">and </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">.</span><span class="s1">releaselevel </span><span class="s4">!= </span><span class="s6">'beta'</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">in </span><span class="s4">(</span><span class="s1">NewType</span><span class="s4">, </span><span class="s1">typing_extensions</span><span class="s4">.</span><span class="s1">NewType</span><span class="s4">) </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, (</span><span class="s1">NewType</span><span class="s4">, </span><span class="s1">typing_extensions</span><span class="s4">.</span><span class="s1">NewType</span><span class="s4">)))</span>
+    <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">3</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">0</span><span class="s4">, </span><span class="s5">0</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typing_extensions</span><span class="s4">.</span><span class="s1">NewType</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s1">TypeError</span><span class="s4">:</span>
+            <span class="s3">pass</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">res</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">res</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">in </span><span class="s4">(</span><span class="s1">NewType</span><span class="s4">, </span><span class="s1">typing_extensions</span><span class="s4">.</span><span class="s1">NewType</span><span class="s4">) </span><span class="s3">or</span>
+                <span class="s4">(</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__supertype__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">) </span><span class="s3">is not None and</span>
+                 <span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__qualname__'</span><span class="s4">, </span><span class="s6">''</span><span class="s4">) == </span><span class="s6">'NewType.&lt;locals&gt;.new_type' </span><span class="s3">and</span>
+                 <span class="s1">tp</span><span class="s4">.</span><span class="s1">__module__ </span><span class="s3">in </span><span class="s4">(</span><span class="s6">'typing'</span><span class="s4">, </span><span class="s6">'typing_extensions'</span><span class="s4">)))</span>
+    <span class="s3">else</span><span class="s4">:  </span><span class="s2"># python 2</span>
+        <span class="s2"># __qualname__ is not available in python 2, so we simplify the test here</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp </span><span class="s3">is </span><span class="s1">NewType </span><span class="s3">or</span>
+                <span class="s4">(</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__supertype__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">) </span><span class="s3">is not None and</span>
+                 <span class="s1">tp</span><span class="s4">.</span><span class="s1">__module__ </span><span class="s3">in </span><span class="s4">(</span><span class="s6">'typing'</span><span class="s4">, </span><span class="s6">'typing_extensions'</span><span class="s4">)))</span>
+
+
+<span class="s3">def </span><span class="s1">is_forward_ref</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Tests if the type is a :class:`typing.ForwardRef`. Examples:: 
+ 
+        u = Union[&quot;Milk&quot;, Way] 
+        args = get_args(u) 
+        is_forward_ref(args[0]) == True 
+        is_forward_ref(args[1]) == False 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if not </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">_ForwardRef</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">ForwardRef</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">get_last_origin</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get the last base of (multiply) subscripted type. Supports generic types, 
+    Union, Callable, and Tuple. Returns None for unsupported types. 
+    Examples:: 
+ 
+        get_last_origin(int) == None 
+        get_last_origin(ClassVar[int]) == None 
+        get_last_origin(Generic[T]) == Generic 
+        get_last_origin(Union[T, int][str]) == Union[T, int] 
+        get_last_origin(List[Tuple[T, T]][int]) == List[Tuple[T, T]] 
+        get_last_origin(List) == List 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s6">'This function is only supported in Python 3.6,'</span>
+                         <span class="s6">' use get_origin instead'</span><span class="s4">)</span>
+    <span class="s1">sentinel </span><span class="s4">= </span><span class="s1">object</span><span class="s4">()</span>
+    <span class="s1">origin </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__origin__'</span><span class="s4">, </span><span class="s1">sentinel</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">origin </span><span class="s3">is </span><span class="s1">sentinel</span><span class="s4">:</span>
+        <span class="s3">return None</span>
+    <span class="s3">if </span><span class="s1">origin </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">tp</span>
+    <span class="s3">return </span><span class="s1">origin</span>
+
+
+<span class="s3">def </span><span class="s1">get_origin</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get the unsubscripted version of a type. Supports generic types, Union, 
+    Callable, and Tuple. Returns None for unsupported types. Examples:: 
+ 
+        get_origin(int) == None 
+        get_origin(ClassVar[int]) == None 
+        get_origin(Generic) == Generic 
+        get_origin(Generic[T]) == Generic 
+        get_origin(Union[T, int]) == Union 
+        get_origin(List[Tuple[T, T]][int]) == list  # List prior to Python 3.7 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is not </span><span class="s1">ClassVar </span><span class="s3">else None</span>
+        <span class="s3">if </span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Generic</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">Generic</span>
+        <span class="s3">return None</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_gorg</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">Union</span>
+    <span class="s3">if </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">Tuple</span>
+    <span class="s3">if </span><span class="s1">is_literal_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">or </span><span class="s1">tp</span>
+        <span class="s3">return </span><span class="s1">Literal</span>
+
+    <span class="s3">return None</span>
+
+
+<span class="s3">def </span><span class="s1">get_parameters</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Return type parameters of a parameterizable type as a tuple 
+    in lexicographic order. Parameterizable types are generic types, 
+    unions, tuple types and callable types. Examples:: 
+ 
+        get_parameters(int) == () 
+        get_parameters(Generic) == () 
+        get_parameters(Union) == () 
+        get_parameters(List[int]) == () 
+ 
+        get_parameters(Generic[T]) == (T,) 
+        get_parameters(Tuple[List[T], List[S_co]]) == (T, S_co) 
+        get_parameters(Union[S_co, Tuple[T, T]][int, U]) == (U,) 
+        get_parameters(Mapping[T, Tuple[S_co, T]]) == (T, S_co) 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">LEGACY_TYPING</span><span class="s4">:</span>
+        <span class="s2"># python &lt;= 3.5.2</span>
+        <span class="s3">if </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+            <span class="s1">params </span><span class="s4">= []</span>
+            <span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__ </span><span class="s3">is not None else </span><span class="s4">()):</span>
+                <span class="s1">params </span><span class="s4">+= </span><span class="s1">get_parameters</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">params</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+            <span class="s1">params </span><span class="s4">= []</span>
+            <span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__ </span><span class="s3">is not None else </span><span class="s4">()):</span>
+                <span class="s1">params </span><span class="s4">+= </span><span class="s1">get_parameters</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">params</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+            <span class="s1">params </span><span class="s4">= []</span>
+            <span class="s1">base_params </span><span class="s4">= </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__</span>
+            <span class="s3">if </span><span class="s1">base_params </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s4">()</span>
+            <span class="s3">for </span><span class="s1">bp_ </span><span class="s3">in </span><span class="s1">base_params</span><span class="s4">:</span>
+                <span class="s3">for </span><span class="s1">bp </span><span class="s3">in </span><span class="s4">(</span><span class="s1">get_args</span><span class="s4">(</span><span class="s1">bp_</span><span class="s4">) </span><span class="s3">if </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">bp_</span><span class="s4">) </span><span class="s3">else </span><span class="s4">(</span><span class="s1">bp_</span><span class="s4">,)):</span>
+                    <span class="s3">if </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">bp</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">bp</span><span class="s4">, </span><span class="s1">TypeVar</span><span class="s4">):</span>
+                        <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span>
+                            <span class="s6">&quot;Cannot inherit from a generic class &quot;</span>
+                            <span class="s6">&quot;parameterized with &quot;</span>
+                            <span class="s6">&quot;non-type-variable %s&quot; </span><span class="s4">% </span><span class="s1">bp</span><span class="s4">)</span>
+                    <span class="s3">if </span><span class="s1">params </span><span class="s3">is None</span><span class="s4">:</span>
+                        <span class="s1">params </span><span class="s4">= []</span>
+                    <span class="s3">if </span><span class="s1">bp </span><span class="s3">not in </span><span class="s1">params</span><span class="s4">:</span>
+                        <span class="s1">params</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">bp</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">params </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">params</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s4">()</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s4">(</span>
+                <span class="s4">(</span>
+                    <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and</span>
+                    <span class="s1">hasattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__parameters__'</span><span class="s4">)</span>
+                <span class="s4">) </span><span class="s3">or</span>
+                <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">Generic</span><span class="s4">) </span><span class="s3">and</span>
+                <span class="s1">tp </span><span class="s3">is not </span><span class="s1">Generic</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s4">(</span>
+        <span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or</span>
+        <span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+    <span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">get_last_args</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get last arguments of (multiply) subscripted type. 
+       Parameters for Callable are flattened. Examples:: 
+ 
+        get_last_args(int) == () 
+        get_last_args(Union) == () 
+        get_last_args(ClassVar[int]) == (int,) 
+        get_last_args(Union[T, int]) == (T, int) 
+        get_last_args(Iterable[Tuple[T, S]][int, T]) == (int, T) 
+        get_last_args(Callable[[T], int]) == (T, int) 
+        get_last_args(Callable[[], int]) == (int,) 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s6">'This function is only supported in Python 3.6,'</span>
+                         <span class="s6">' use get_args instead'</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">is_classvar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__type__</span><span class="s4">,) </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__type__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">is not None and </span><span class="s1">len</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span><span class="s4">) &gt; </span><span class="s5">0</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2"># python 3.5.1</span>
+            <span class="s3">pass</span>
+        <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2"># python 3.5.2</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">elif </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2"># python 3.5.2</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__ </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">_eval_args</span><span class="s4">(</span><span class="s1">args</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Internal helper for get_args.&quot;&quot;&quot;</span>
+    <span class="s1">res </span><span class="s4">= []</span>
+    <span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s1">args</span><span class="s4">:</span>
+        <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">):</span>
+            <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]):</span>
+            <span class="s1">callable_args </span><span class="s4">= </span><span class="s1">_eval_args</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">[</span><span class="s5">1</span><span class="s4">:])</span>
+            <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">) == </span><span class="s5">2</span><span class="s4">:</span>
+                <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">Callable</span><span class="s4">[[], </span><span class="s1">callable_args</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]])</span>
+            <span class="s3">elif </span><span class="s1">arg</span><span class="s4">[</span><span class="s5">1</span><span class="s4">] </span><span class="s3">is </span><span class="s1">Ellipsis</span><span class="s4">:</span>
+                <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">callable_args</span><span class="s4">[</span><span class="s5">1</span><span class="s4">]])</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">Callable</span><span class="s4">[</span><span class="s1">list</span><span class="s4">(</span><span class="s1">callable_args</span><span class="s4">[:-</span><span class="s5">1</span><span class="s4">]), </span><span class="s1">callable_args</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">]])</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">type</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]).</span><span class="s1">__getitem__</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">[</span><span class="s5">0</span><span class="s4">], </span><span class="s1">_eval_args</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">[</span><span class="s5">1</span><span class="s4">:])))</span>
+    <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">res</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">get_args</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">evaluate</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get type arguments with all substitutions performed. For unions, 
+    basic simplifications used by Union constructor are performed. 
+    On versions prior to 3.7 if `evaluate` is False (default), 
+    report result as nested tuple, this matches 
+    the internal representation of types. If `evaluate` is True 
+    (or if Python version is 3.7 or greater), then all 
+    type parameters are applied (this could be time and memory expensive). 
+    Examples:: 
+ 
+        get_args(int) == () 
+        get_args(Union[int, Union[T, int], str][int]) == (int, str) 
+        get_args(Union[int, Tuple[T, int]][str]) == (int, (Tuple, str, int)) 
+ 
+        get_args(Union[int, Tuple[T, int]][str], evaluate=True) == \ 
+                 (int, Tuple[str, int]) 
+        get_args(Dict[int, Tuple[T, T]][Optional[int]], evaluate=True) == \ 
+                 (int, Tuple[Optional[int], Optional[int]]) 
+        get_args(Callable[[], T][int], evaluate=True) == ([], int,) 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">NEW_TYPING</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">evaluate </span><span class="s3">is not None and not </span><span class="s1">evaluate</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s6">'evaluate can only be True in Python &gt;= 3.7'</span><span class="s4">)</span>
+        <span class="s2"># Note special aliases on Python 3.9 don't have __args__.</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">typingGenericAlias</span><span class="s4">) </span><span class="s3">and </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__args__'</span><span class="s4">):</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span>
+            <span class="s3">if </span><span class="s1">get_origin</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">collections</span><span class="s4">.</span><span class="s1">abc</span><span class="s4">.</span><span class="s1">Callable </span><span class="s3">and </span><span class="s1">res</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">Ellipsis</span><span class="s4">:</span>
+                <span class="s1">res </span><span class="s4">= (</span><span class="s1">list</span><span class="s4">(</span><span class="s1">res</span><span class="s4">[:-</span><span class="s5">1</span><span class="s4">]), </span><span class="s1">res</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">])</span>
+            <span class="s3">return </span><span class="s1">res</span>
+        <span class="s3">if </span><span class="s1">MaybeUnionType </span><span class="s3">and </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">MaybeUnionType</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span>
+        <span class="s3">return </span><span class="s4">()</span>
+    <span class="s3">if </span><span class="s1">is_classvar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or </span><span class="s1">is_final_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__type__</span><span class="s4">,) </span><span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__type__ </span><span class="s3">is not None else </span><span class="s4">()</span>
+    <span class="s3">if </span><span class="s1">is_literal_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__values__ </span><span class="s3">or </span><span class="s4">()</span>
+    <span class="s3">if </span><span class="s4">(</span>
+        <span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or</span>
+        <span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">or </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+    <span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">tree </span><span class="s4">= </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">_subs_tree</span><span class="s4">()</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2"># Old python typing module &lt;= 3.5.3</span>
+            <span class="s3">if </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+                <span class="s2"># backport of union's subs_tree</span>
+                <span class="s1">tree </span><span class="s4">= </span><span class="s1">_union_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+            <span class="s3">elif </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+                <span class="s2"># backport of GenericMeta's subs_tree</span>
+                <span class="s1">tree </span><span class="s4">= </span><span class="s1">_generic_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+            <span class="s3">elif </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+                <span class="s2"># ad-hoc (inspired by union)</span>
+                <span class="s1">tree </span><span class="s4">= </span><span class="s1">_tuple_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s2"># tree = _subs_tree(tp)</span>
+                <span class="s3">return </span><span class="s4">()</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">tree</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">) </span><span class="s3">and </span><span class="s1">len</span><span class="s4">(</span><span class="s1">tree</span><span class="s4">) &gt; </span><span class="s5">1</span><span class="s4">:</span>
+            <span class="s3">if not </span><span class="s1">evaluate</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">tree</span><span class="s4">[</span><span class="s5">1</span><span class="s4">:]</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">_eval_args</span><span class="s4">(</span><span class="s1">tree</span><span class="s4">[</span><span class="s5">1</span><span class="s4">:])</span>
+            <span class="s3">if </span><span class="s1">get_origin</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">) </span><span class="s3">is </span><span class="s1">Callable </span><span class="s3">and </span><span class="s1">res</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">Ellipsis</span><span class="s4">:</span>
+                <span class="s1">res </span><span class="s4">= (</span><span class="s1">list</span><span class="s4">(</span><span class="s1">res</span><span class="s4">[:-</span><span class="s5">1</span><span class="s4">]), </span><span class="s1">res</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">])</span>
+            <span class="s3">return </span><span class="s1">res</span>
+
+    <span class="s3">return </span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">get_bound</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Return the type bound to a `TypeVar` if any. 
+ 
+    It the type is not a `TypeVar`, a `TypeError` is raised. 
+    Examples:: 
+ 
+        get_bound(TypeVar('T')) == None 
+        get_bound(TypeVar('T', bound=int)) == int 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">is_typevar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__bound__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s6">&quot;type is not a `TypeVar`: &quot; </span><span class="s4">+ </span><span class="s1">str</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">))</span>
+
+
+<span class="s3">def </span><span class="s1">get_constraints</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Returns the constraints of a `TypeVar` if any. 
+ 
+    It the type is not a `TypeVar`, a `TypeError` is raised 
+    Examples:: 
+ 
+        get_constraints(TypeVar('T')) == () 
+        get_constraints(TypeVar('T', int, str)) == (int, str) 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">is_typevar</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__constraints__'</span><span class="s4">, ())</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s6">&quot;type is not a `TypeVar`: &quot; </span><span class="s4">+ </span><span class="s1">str</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">))</span>
+
+
+<span class="s3">def </span><span class="s1">get_generic_type</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get the generic type of an object if possible, or runtime class otherwise. 
+    Examples:: 
+ 
+        class Node(Generic[T]): 
+            ... 
+        type(Node[int]()) == Node 
+        get_generic_type(Node[int]()) == Node[int] 
+        get_generic_type(Node[T]()) == Node[T] 
+        get_generic_type(1) == int 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">gen_type </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s6">'__orig_class__'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">gen_type </span><span class="s3">if </span><span class="s1">gen_type </span><span class="s3">is not None else </span><span class="s1">type</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">get_generic_bases</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Get generic base types of a type or empty tuple if not possible. 
+    Example:: 
+ 
+        class MyClass(List[int], Mapping[str, List[int]]): 
+            ... 
+        MyClass.__bases__ == (List, Mapping) 
+        get_generic_bases(MyClass) == (List[int], Mapping[str, List[int]]) 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">LEGACY_TYPING</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">t </span><span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__bases__ </span><span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">t</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">))</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s6">'__orig_bases__'</span><span class="s4">, ())</span>
+
+
+<span class="s3">def </span><span class="s1">typed_dict_keys</span><span class="s4">(</span><span class="s1">td</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;If td is a TypedDict class, return a dictionary mapping the typed keys to types. 
+    Otherwise, return None. Examples:: 
+ 
+        class TD(TypedDict): 
+            x: int 
+            y: int 
+        class Other(dict): 
+            x: int 
+            y: int 
+ 
+        typed_dict_keys(TD) == {'x': int, 'y': int} 
+        typed_dict_keys(dict) == None 
+        typed_dict_keys(Other) == None 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">td</span><span class="s4">, (</span><span class="s1">_TypedDictMeta_Mypy</span><span class="s4">, </span><span class="s1">_TypedDictMeta_TE</span><span class="s4">)):</span>
+        <span class="s3">return </span><span class="s1">td</span><span class="s4">.</span><span class="s1">__annotations__</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+    <span class="s3">return None</span>
+
+
+<span class="s3">def </span><span class="s1">get_forward_arg</span><span class="s4">(</span><span class="s1">fr</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If fr is a ForwardRef, return the string representation of the forward reference. 
+    Otherwise return None. Examples:: 
+ 
+        tp = List[&quot;FRef&quot;] 
+        fr = get_args(tp)[0] 
+        get_forward_arg(fr) == &quot;FRef&quot; 
+        get_forward_arg(tp) == None 
+    &quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s1">fr</span><span class="s4">.</span><span class="s1">__forward_arg__ </span><span class="s3">if </span><span class="s1">is_forward_ref</span><span class="s4">(</span><span class="s1">fr</span><span class="s4">) </span><span class="s3">else None</span>
+
+
+<span class="s2"># A few functions backported and adapted for the LEGACY_TYPING context, and used above</span>
+
+<span class="s3">def </span><span class="s1">_replace_arg</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;backport of _replace_arg&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">tvars </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">tvars </span><span class="s4">= []</span>
+    <span class="s2"># if hasattr(arg, '_subs_tree') and isinstance(arg, (GenericMeta, _TypingBase)):</span>
+    <span class="s2">#     return arg._subs_tree(tvars, args)</span>
+    <span class="s3">if </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_union_subs_tree</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_tuple_subs_tree</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_generic_subs_tree</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">TypeVar</span><span class="s4">):</span>
+        <span class="s3">for </span><span class="s1">i</span><span class="s4">, </span><span class="s1">tvar </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">tvars</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">arg </span><span class="s4">== </span><span class="s1">tvar</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s1">args</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]</span>
+    <span class="s3">return </span><span class="s1">arg</span>
+
+
+<span class="s3">def </span><span class="s1">_remove_dups_flatten</span><span class="s4">(</span><span class="s1">parameters</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;backport of _remove_dups_flatten&quot;&quot;&quot;</span>
+
+    <span class="s2"># Flatten out Union[Union[...], ...].</span>
+    <span class="s1">params </span><span class="s4">= []</span>
+    <span class="s3">for </span><span class="s1">p </span><span class="s3">in </span><span class="s1">parameters</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">p</span><span class="s4">, </span><span class="s1">_Union</span><span class="s4">):  </span><span class="s2"># and p.__origin__ is Union:</span>
+            <span class="s1">params</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">p</span><span class="s4">.</span><span class="s1">__union_params__</span><span class="s4">)  </span><span class="s2"># p.__args__)</span>
+        <span class="s3">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">p</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">) </span><span class="s3">and </span><span class="s1">len</span><span class="s4">(</span><span class="s1">p</span><span class="s4">) &gt; </span><span class="s5">0 </span><span class="s3">and </span><span class="s1">p</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] </span><span class="s3">is </span><span class="s1">Union</span><span class="s4">:</span>
+            <span class="s1">params</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">p</span><span class="s4">[</span><span class="s5">1</span><span class="s4">:])</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">params</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">p</span><span class="s4">)</span>
+    <span class="s2"># Weed out strict duplicates, preserving the first of each occurrence.</span>
+    <span class="s1">all_params </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">params</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">all_params</span><span class="s4">) &lt; </span><span class="s1">len</span><span class="s4">(</span><span class="s1">params</span><span class="s4">):</span>
+        <span class="s1">new_params </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">params</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">t </span><span class="s3">in </span><span class="s1">all_params</span><span class="s4">:</span>
+                <span class="s1">new_params</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+                <span class="s1">all_params</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+        <span class="s1">params </span><span class="s4">= </span><span class="s1">new_params</span>
+        <span class="s3">assert not </span><span class="s1">all_params</span><span class="s4">, </span><span class="s1">all_params</span>
+    <span class="s2"># Weed out subclasses.</span>
+    <span class="s2"># E.g. Union[int, Employee, Manager] == Union[int, Employee].</span>
+    <span class="s2"># If object is present it will be sole survivor among proper classes.</span>
+    <span class="s2"># Never discard type variables.</span>
+    <span class="s2"># (In particular, Union[str, AnyStr] != AnyStr.)</span>
+    <span class="s1">all_params </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">params</span><span class="s4">)</span>
+    <span class="s3">for </span><span class="s1">t1 </span><span class="s3">in </span><span class="s1">params</span><span class="s4">:</span>
+        <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">t1</span><span class="s4">, </span><span class="s1">type</span><span class="s4">):</span>
+            <span class="s3">continue</span>
+        <span class="s3">if </span><span class="s1">any</span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">t2</span><span class="s4">, </span><span class="s1">type</span><span class="s4">) </span><span class="s3">and </span><span class="s1">issubclass</span><span class="s4">(</span><span class="s1">t1</span><span class="s4">, </span><span class="s1">t2</span><span class="s4">)</span>
+               <span class="s3">for </span><span class="s1">t2 </span><span class="s3">in </span><span class="s1">all_params </span><span class="s4">- {</span><span class="s1">t1</span><span class="s4">}</span>
+               <span class="s3">if </span><span class="s4">(</span><span class="s3">not </span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">t2</span><span class="s4">, </span><span class="s1">GenericMeta</span><span class="s4">) </span><span class="s3">and</span>
+                        <span class="s1">get_origin</span><span class="s4">(</span><span class="s1">t2</span><span class="s4">) </span><span class="s3">is not None</span><span class="s4">) </span><span class="s3">and</span>
+                   <span class="s3">not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">t2</span><span class="s4">, </span><span class="s1">TypeVar</span><span class="s4">))):</span>
+            <span class="s1">all_params</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">t1</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">t </span><span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">params </span><span class="s3">if </span><span class="s1">t </span><span class="s3">in </span><span class="s1">all_params</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_subs_tree</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">args</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;backport of typing._subs_tree, adapted for legacy versions &quot;&quot;&quot;</span>
+    <span class="s3">def </span><span class="s1">_get_origin</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__origin__</span>
+        <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s3">return None</span>
+
+    <span class="s1">current </span><span class="s4">= </span><span class="s1">_get_origin</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">current </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">if not </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">cls</span>
+
+    <span class="s2"># Make of chain of origins (i.e. cls -&gt; cls.__origin__)</span>
+    <span class="s1">orig_chain </span><span class="s4">= []</span>
+    <span class="s3">while </span><span class="s1">_get_origin</span><span class="s4">(</span><span class="s1">current</span><span class="s4">) </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">orig_chain</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">current</span><span class="s4">)</span>
+        <span class="s1">current </span><span class="s4">= </span><span class="s1">_get_origin</span><span class="s4">(</span><span class="s1">current</span><span class="s4">)</span>
+
+    <span class="s2"># Replace type variables in __args__ if asked ...</span>
+    <span class="s1">tree_args </span><span class="s4">= []</span>
+
+    <span class="s3">def </span><span class="s1">_get_args</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+            <span class="s1">cls_args </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__union_params__</span>
+        <span class="s3">elif </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+            <span class="s1">cls_args </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__tuple_params__</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">cls_args </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__args__</span>
+            <span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+                <span class="s1">cls_args </span><span class="s4">= ()</span>
+        <span class="s3">return </span><span class="s1">cls_args </span><span class="s3">if </span><span class="s1">cls_args </span><span class="s3">is not None else </span><span class="s4">()</span>
+
+    <span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s1">_get_args</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+        <span class="s1">tree_args</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">_replace_arg</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">))</span>
+    <span class="s2"># ... then continue replacing down the origin chain.</span>
+    <span class="s3">for </span><span class="s1">ocls </span><span class="s3">in </span><span class="s1">orig_chain</span><span class="s4">:</span>
+        <span class="s1">new_tree_args </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s1">_get_args</span><span class="s4">(</span><span class="s1">ocls</span><span class="s4">):</span>
+            <span class="s1">new_tree_args</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">_replace_arg</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">, </span><span class="s1">get_parameters</span><span class="s4">(</span><span class="s1">ocls</span><span class="s4">), </span><span class="s1">tree_args</span><span class="s4">))</span>
+        <span class="s1">tree_args </span><span class="s4">= </span><span class="s1">new_tree_args</span>
+    <span class="s3">return </span><span class="s1">tree_args</span>
+
+
+<span class="s3">def </span><span class="s1">_union_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">args</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; backport of Union._subs_tree &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Union</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">Union  </span><span class="s2"># Nothing to substitute</span>
+    <span class="s1">tree_args </span><span class="s4">= </span><span class="s1">_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s2"># tree_args = tp.__union_params__ if tp.__union_params__ is not None else ()</span>
+    <span class="s1">tree_args </span><span class="s4">= </span><span class="s1">_remove_dups_flatten</span><span class="s4">(</span><span class="s1">tree_args</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">tree_args</span><span class="s4">) == </span><span class="s5">1</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">tree_args</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]  </span><span class="s2"># Union of a single type is that type</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">Union</span><span class="s4">,) + </span><span class="s1">tree_args</span>
+
+
+<span class="s3">def </span><span class="s1">_generic_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">args</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; backport of GenericMeta._subs_tree &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__origin__ </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">tp</span>
+    <span class="s1">tree_args </span><span class="s4">= </span><span class="s1">_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">_gorg</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">),) + </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">tree_args</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_tuple_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">args</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot; ad-hoc function (inspired by union) for legacy typing &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">tp </span><span class="s3">is </span><span class="s1">Tuple</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">Tuple  </span><span class="s2"># Nothing to substitute</span>
+    <span class="s1">tree_args </span><span class="s4">= </span><span class="s1">_subs_tree</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">, </span><span class="s1">tvars</span><span class="s4">, </span><span class="s1">args</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">Tuple</span><span class="s4">,) + </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">tree_args</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">t </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+    <span class="s3">elif </span><span class="s1">is_union_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_union_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">is_tuple_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_tuple_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">is_generic_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_generic_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">is_callable_type</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_callable_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">)</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">_union_has_type_var</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__union_params__</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+                <span class="s3">return True</span>
+    <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">_tuple_has_type_var</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__tuple_params__</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+                <span class="s3">return True</span>
+    <span class="s3">return False</span>
+
+
+<span class="s3">def </span><span class="s1">_callable_has_type_var</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__args__</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+                <span class="s3">return True</span>
+    <span class="s3">return </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__result__</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_generic_has_type_var</span><span class="s4">(</span><span class="s1">tp</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">tp</span><span class="s4">.</span><span class="s1">__parameters__</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">_has_type_var</span><span class="s4">(</span><span class="s1">t</span><span class="s4">):</span>
+                <span class="s3">return True</span>
+    <span class="s3">return False</span>
+</pre>
+</body>
+</html>

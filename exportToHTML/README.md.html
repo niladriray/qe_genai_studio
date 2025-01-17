@@ -1,0 +1,119 @@
+<html>
+<head>
+<title>README.md</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #c77dbb; font-style: italic;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+README.md</font>
+</center></td></tr></table>
+<pre><span class="s0"># </span><span class="s2">QE-GenAI Framework</span>
+
+<span class="s2">A modular Python framework for building GenAI applications with connectors, tokenizers, pipelines, and utilities.</span>
+
+<span class="s0">## </span><span class="s2">Table of Contents</span>
+<span class="s0">1. </span><span class="s1">[</span><span class="s2">Features</span><span class="s1">](</span><span class="s2">#features</span><span class="s1">)</span>
+<span class="s0">2. </span><span class="s1">[</span><span class="s2">Installation</span><span class="s1">](</span><span class="s2">#installation</span><span class="s1">)</span>
+<span class="s0">3. </span><span class="s1">[</span><span class="s2">Usage</span><span class="s1">](</span><span class="s2">#usage</span><span class="s1">)</span>
+<span class="s0">4. </span><span class="s1">[</span><span class="s2">Folder Structure</span><span class="s1">](</span><span class="s2">#folder-structure</span><span class="s1">)</span>
+<span class="s0">5. </span><span class="s1">[</span><span class="s2">Dependencies</span><span class="s1">](</span><span class="s2">#dependencies</span><span class="s1">)</span>
+<span class="s0">6. </span><span class="s1">[</span><span class="s2">Contributing</span><span class="s1">](</span><span class="s2">#contributing</span><span class="s1">)</span>
+<span class="s0">7. </span><span class="s1">[</span><span class="s2">License</span><span class="s1">](</span><span class="s2">#license</span><span class="s1">)</span>
+
+
+<span class="s0">## </span><span class="s2">Features</span>
+<span class="s0">- </span><span class="s1">**</span><span class="s2">Connectors</span><span class="s1">**: </span><span class="s2">Easy-to-use connectors for GPT APIs, databases, and spreadsheets.</span>
+<span class="s0">- </span><span class="s1">**</span><span class="s2">Tokenizers</span><span class="s1">**: </span><span class="s2">Tokenize text and image data using LangChain tools.</span>
+<span class="s0">- </span><span class="s1">**</span><span class="s2">Pipelines</span><span class="s1">**: </span><span class="s2">Modular workflows like Retrieval-Augmented Generation </span><span class="s1">(</span><span class="s2">RAG</span><span class="s1">)</span><span class="s2">.</span>
+<span class="s0">- </span><span class="s1">**</span><span class="s2">Utilities</span><span class="s1">**: </span><span class="s2">Logging, configuration management, and helper tools.</span>
+
+<span class="s0">### </span><span class="s1">**</span><span class="s2">Connectors</span><span class="s1">**</span>
+<span class="s2">Connectors are responsible for integrating with various external systems like GPT APIs, databases, and spreadsheets.</span>
+
+<span class="s0">| </span><span class="s1">**Connector**            </span><span class="s0">| </span><span class="s1">**Purpose**                                               </span><span class="s0">|</span>
+<span class="s0">|---------------------------|-----------------------------------------------------------|</span>
+<span class="s0">| </span><span class="s1">**GPTGatewayConnector**   </span><span class="s0">| </span><span class="s1">Manages interactions with GPT APIs via Azure API Gateway. </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**DBConnector**           </span><span class="s0">| </span><span class="s1">Handles database connections using SQLAlchemy.            </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**SpreadsheetConnector**  </span><span class="s0">| </span><span class="s1">Integrates with spreadsheet tools like Excel or CSV.      </span><span class="s0">|</span>
+
+<span class="s1">**</span><span class="s2">Note</span><span class="s1">**: </span><span class="s2">Ensure connectors are interface-driven for easy extension to new data sources.</span>
+
+<span class="s0">### </span><span class="s1">**</span><span class="s2">Tokenizers</span><span class="s1">**</span>
+<span class="s2">Tokenizers break data into smaller, manageable chunks for processing. The framework uses LangChain's tokenization tools.</span>
+
+<span class="s0">| </span><span class="s1">**Tokenizer**            </span><span class="s0">| </span><span class="s1">**Purpose**                                  </span><span class="s0">|</span>
+<span class="s0">|---------------------------|----------------------------------------------|</span>
+<span class="s0">| </span><span class="s1">**TextTokenizer**         </span><span class="s0">| </span><span class="s1">Splits textual data into chunks.            </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**ImageTokenizer**        </span><span class="s0">| </span><span class="s1">Converts image inputs into embeddings.      </span><span class="s0">|</span>
+
+<span class="s1">**</span><span class="s2">Note</span><span class="s1">**: </span><span class="s2">Tokenizers follow a consistent API for scalability. Support for additional modalities like audio and video can be added easily.</span>
+
+
+<span class="s0">### </span><span class="s1">**</span><span class="s2">Completion Generators</span><span class="s1">**</span>
+<span class="s2">Completion Generators process input data and generate outputs using different techniques and pipelines.</span>
+
+<span class="s0">| </span><span class="s1">**Pipeline**             </span><span class="s0">| </span><span class="s1">**Purpose**                                      </span><span class="s0">|</span>
+<span class="s0">|---------------------------|-------------------------------------------------|</span>
+<span class="s0">| </span><span class="s1">**RAGPipeline**           </span><span class="s0">| </span><span class="s1">Implements Retrieval-Augmented Generation.      </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**TestCaseGenerator**     </span><span class="s0">| </span><span class="s1">Generates test cases based on inputs.           </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**UseCase2Generator**     </span><span class="s0">| </span><span class="s1">Handles specific use case generation logic.     </span><span class="s0">|</span>
+
+<span class="s1">**</span><span class="s2">Note</span><span class="s1">**: </span><span class="s2">These modules are </span><span class="s1">**</span><span class="s2">loosely coupled</span><span class="s1">** </span><span class="s2">and can be tested or extended independently.</span>
+
+
+<span class="s0">### </span><span class="s1">**</span><span class="s2">Model Accuracy</span><span class="s1">**</span>
+<span class="s2">This component evaluates the quality of model outputs using standard metrics.</span>
+
+<span class="s0">| </span><span class="s1">**Module**               </span><span class="s0">| </span><span class="s1">**Purpose**                                      </span><span class="s0">|</span>
+<span class="s0">|---------------------------|-------------------------------------------------|</span>
+<span class="s0">| </span><span class="s1">**BELUCalculator**        </span><span class="s0">| </span><span class="s1">Measures text generation quality using BLEU.    </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**AccuracyReport**        </span><span class="s0">| </span><span class="s1">Generates structured accuracy metrics.          </span><span class="s0">|</span>
+
+<span class="s1">**</span><span class="s2">Note</span><span class="s1">**: </span><span class="s2">Additional evaluation metrics like </span><span class="s1">**</span><span class="s2">ROUGE</span><span class="s1">** </span><span class="s2">and </span><span class="s1">**</span><span class="s2">METEOR</span><span class="s1">** </span><span class="s2">can be included for task-specific evaluation.</span>
+
+
+<span class="s0">### </span><span class="s1">**</span><span class="s2">Utilities</span><span class="s1">**</span>
+<span class="s2">Utilities provide support functions that ensure smooth execution and consistency across the framework.</span>
+
+<span class="s0">| </span><span class="s1">**Utility**              </span><span class="s0">| </span><span class="s1">**Purpose**                                      </span><span class="s0">|</span>
+<span class="s0">|---------------------------|-------------------------------------------------|</span>
+<span class="s0">| </span><span class="s1">**Logger**                </span><span class="s0">| </span><span class="s1">Standardized logging for all components.        </span><span class="s0">|</span>
+<span class="s0">| </span><span class="s1">**AccuracyReport**        </span><span class="s0">| </span><span class="s1">Redundant; ensure this is a single utility.     </span><span class="s0">|</span>
+
+<span class="s1">**</span><span class="s2">Note</span><span class="s1">**: </span><span class="s2">Utility modules like `Logger` and `ConfigManager` should be centralized for reusability.</span>
+
+
+
+
+
+<span class="s0">## </span><span class="s2">Installation</span>
+
+<span class="s0">1. </span><span class="s2">Clone the repository</span><span class="s1">:</span>
+   <span class="s0">```</span><span class="s3">bash</span>
+   <span class="s4">git clone https://github.com/yourusername/qe-genai-framework.git</span>
+   <span class="s4">cd qe-genai-framework</span>
+   
+
+
+<span class="s2">Advantages of This Design</span>
+	<span class="s2">1.	Prompt Engineering</span><span class="s1">:</span>
+	<span class="s2">•	Uses carefully crafted prompts to generate high-quality test cases.</span>
+	<span class="s2">2.	Format Flexibility</span><span class="s1">:</span>
+	<span class="s2">•	Handles multiple formats </span><span class="s1">(</span><span class="s2">plain text, BDD, custom</span><span class="s1">) </span><span class="s2">with easy extensions for additional formats.</span>
+	<span class="s2">3.	RAG Architecture</span><span class="s1">:</span>
+	<span class="s2">•	Combines retrieval and generation for context-aware test case creation.</span>
+	<span class="s2">4.	LangChain Integration</span><span class="s1">:</span>
+	<span class="s2">•	Modular and scalable pipeline for embedding, querying, and generation.</span>
+	<span class="s2">5.	Persistent Storage</span><span class="s1">:</span>
+	<span class="s2">•	Automatically stores generated test cases in the embedding store for future use.</span></pre>
+</body>
+</html>

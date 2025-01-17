@@ -1,0 +1,773 @@
+<html>
+<head>
+<title>version.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+version.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (C) 2012-2023 The Python Software Foundation.</span>
+<span class="s0"># See LICENSE.txt and CONTRIBUTORS.txt.</span>
+<span class="s0">#</span>
+<span class="s2">&quot;&quot;&quot; 
+Implementation of a flexible versioning scheme providing support for PEP-440, 
+setuptools-compatible and semantic versioning. 
+&quot;&quot;&quot;</span>
+
+<span class="s3">import </span><span class="s1">logging</span>
+<span class="s3">import </span><span class="s1">re</span>
+
+<span class="s3">from </span><span class="s4">.</span><span class="s1">compat </span><span class="s3">import </span><span class="s1">string_types</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">parse_requirement</span>
+
+<span class="s1">__all__ </span><span class="s4">= [</span><span class="s5">'NormalizedVersion'</span><span class="s4">, </span><span class="s5">'NormalizedMatcher'</span><span class="s4">,</span>
+           <span class="s5">'LegacyVersion'</span><span class="s4">, </span><span class="s5">'LegacyMatcher'</span><span class="s4">,</span>
+           <span class="s5">'SemanticVersion'</span><span class="s4">, </span><span class="s5">'SemanticMatcher'</span><span class="s4">,</span>
+           <span class="s5">'UnsupportedVersionError'</span><span class="s4">, </span><span class="s5">'get_scheme'</span><span class="s4">]</span>
+
+<span class="s1">logger </span><span class="s4">= </span><span class="s1">logging</span><span class="s4">.</span><span class="s1">getLogger</span><span class="s4">(</span><span class="s1">__name__</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">UnsupportedVersionError</span><span class="s4">(</span><span class="s1">ValueError</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;This is an unsupported version.&quot;&quot;&quot;</span>
+    <span class="s3">pass</span>
+
+
+<span class="s3">class </span><span class="s1">Version</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_string </span><span class="s4">= </span><span class="s1">s </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s4">= </span><span class="s1">parts </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">parse</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">) &gt; </span><span class="s6">0</span>
+
+    <span class="s3">def </span><span class="s1">parse</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s5">'please implement in a subclass'</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_check_compatible</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">type</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) != </span><span class="s1">type</span><span class="s4">(</span><span class="s1">other</span><span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s5">'cannot compare %r and %r' </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_check_compatible</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s4">== </span><span class="s1">other</span><span class="s4">.</span><span class="s1">_parts</span>
+
+    <span class="s3">def </span><span class="s1">__ne__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__lt__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_check_compatible</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s4">&lt; </span><span class="s1">other</span><span class="s4">.</span><span class="s1">_parts</span>
+
+    <span class="s3">def </span><span class="s1">__gt__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return not </span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__lt__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">) </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__le__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__lt__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">) </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__ge__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__gt__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">) </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s0"># See http://docs.python.org/reference/datamodel#object.__hash__</span>
+    <span class="s3">def </span><span class="s1">__hash__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">hash</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s5">&quot;%s('%s')&quot; </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_string</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__str__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_string</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">is_prerelease</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s5">'Please implement in subclasses.'</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">Matcher</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s1">version_class </span><span class="s4">= </span><span class="s3">None</span>
+
+    <span class="s0"># value is either a callable or the name of a method</span>
+    <span class="s1">_operators </span><span class="s4">= {</span>
+        <span class="s5">'&lt;'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">&lt; </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'&gt;'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">&gt; </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'&lt;='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">== </span><span class="s1">c </span><span class="s3">or </span><span class="s1">v </span><span class="s4">&lt; </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'&gt;='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">== </span><span class="s1">c </span><span class="s3">or </span><span class="s1">v </span><span class="s4">&gt; </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'=='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">== </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'==='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">== </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s0"># by default, compatible =&gt; &gt;=.</span>
+        <span class="s5">'~='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">== </span><span class="s1">c </span><span class="s3">or </span><span class="s1">v </span><span class="s4">&gt; </span><span class="s1">c</span><span class="s4">,</span>
+        <span class="s5">'!='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">v</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s1">p</span><span class="s4">: </span><span class="s1">v </span><span class="s4">!= </span><span class="s1">c</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s0"># this is a method only to support alternative implementations</span>
+    <span class="s0"># via overriding</span>
+    <span class="s3">def </span><span class="s1">parse_requirement</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">parse_requirement</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version_class </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'Please specify a version class'</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_string </span><span class="s4">= </span><span class="s1">s </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">()</span>
+        <span class="s1">r </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">parse_requirement</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">if not </span><span class="s1">r</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'Not valid: %r' </span><span class="s4">% </span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">name </span><span class="s4">= </span><span class="s1">r</span><span class="s4">.</span><span class="s1">name</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">name</span><span class="s4">.</span><span class="s1">lower</span><span class="s4">()    </span><span class="s0"># for case-insensitive comparisons</span>
+        <span class="s1">clist </span><span class="s4">= []</span>
+        <span class="s3">if </span><span class="s1">r</span><span class="s4">.</span><span class="s1">constraints</span><span class="s4">:</span>
+            <span class="s0"># import pdb; pdb.set_trace()</span>
+            <span class="s3">for </span><span class="s1">op</span><span class="s4">, </span><span class="s1">s </span><span class="s3">in </span><span class="s1">r</span><span class="s4">.</span><span class="s1">constraints</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">s</span><span class="s4">.</span><span class="s1">endswith</span><span class="s4">(</span><span class="s5">'.*'</span><span class="s4">):</span>
+                    <span class="s3">if </span><span class="s1">op </span><span class="s3">not in </span><span class="s4">(</span><span class="s5">'=='</span><span class="s4">, </span><span class="s5">'!='</span><span class="s4">):</span>
+                        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\'</span><span class="s5">.*</span><span class="s3">\' </span><span class="s5">not allowed for '</span>
+                                         <span class="s5">'%r constraints' </span><span class="s4">% </span><span class="s1">op</span><span class="s4">)</span>
+                    <span class="s0"># Could be a partial version (e.g. for '2.*') which</span>
+                    <span class="s0"># won't parse as a version, so keep it as a string</span>
+                    <span class="s1">vn</span><span class="s4">, </span><span class="s1">prefix </span><span class="s4">= </span><span class="s1">s</span><span class="s4">[:-</span><span class="s6">2</span><span class="s4">], </span><span class="s3">True</span>
+                    <span class="s0"># Just to check that vn is a valid version</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">version_class</span><span class="s4">(</span><span class="s1">vn</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s0"># Should parse as a version, so we can create an</span>
+                    <span class="s0"># instance for the comparison</span>
+                    <span class="s1">vn</span><span class="s4">, </span><span class="s1">prefix </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version_class</span><span class="s4">(</span><span class="s1">s</span><span class="s4">), </span><span class="s3">False</span>
+                <span class="s1">clist</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s1">op</span><span class="s4">, </span><span class="s1">vn</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">))</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">clist</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">match</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Check if the provided version matches the constraints. 
+ 
+        :param version: The version to match against this instance. 
+        :type version: String or :class:`Version` instance. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+            <span class="s1">version </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version_class</span><span class="s4">(</span><span class="s1">version</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">operator</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">:</span>
+            <span class="s1">f </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_operators</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">operator</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">f</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+                <span class="s1">f </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">f</span><span class="s4">)</span>
+            <span class="s3">if not </span><span class="s1">f</span><span class="s4">:</span>
+                <span class="s1">msg </span><span class="s4">= (</span><span class="s5">'%r not implemented '</span>
+                       <span class="s5">'for %s' </span><span class="s4">% (</span><span class="s1">operator</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">))</span>
+                <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+            <span class="s3">if not </span><span class="s1">f</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+                <span class="s3">return False</span>
+        <span class="s3">return True</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">exact_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">) == </span><span class="s6">1 </span><span class="s3">and </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[</span><span class="s6">0</span><span class="s4">][</span><span class="s6">0</span><span class="s4">] </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'=='</span><span class="s4">, </span><span class="s5">'==='</span><span class="s4">):</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[</span><span class="s6">0</span><span class="s4">][</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">_check_compatible</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">type</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) != </span><span class="s1">type</span><span class="s4">(</span><span class="s1">other</span><span class="s4">) </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">name </span><span class="s4">!= </span><span class="s1">other</span><span class="s4">.</span><span class="s1">name</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s5">'cannot compare %s and %s' </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_check_compatible</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">== </span><span class="s1">other</span><span class="s4">.</span><span class="s1">key </span><span class="s3">and </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s4">== </span><span class="s1">other</span><span class="s4">.</span><span class="s1">_parts</span>
+
+    <span class="s3">def </span><span class="s1">__ne__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+        <span class="s3">return not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__eq__</span><span class="s4">(</span><span class="s1">other</span><span class="s4">)</span>
+
+    <span class="s0"># See http://docs.python.org/reference/datamodel#object.__hash__</span>
+    <span class="s3">def </span><span class="s1">__hash__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">hash</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">) + </span><span class="s1">hash</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s5">&quot;%s(%r)&quot; </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_string</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__str__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_string</span>
+
+
+<span class="s1">PEP440_VERSION_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^v?(\d+!)?(\d+(\.\d+)*)((a|alpha|b|beta|c|rc|pre|preview)(\d+)?)?'</span>
+                               <span class="s5">r'(\.(post|r|rev)(\d+)?)?([._-]?(dev)(\d+)?)?'</span>
+                               <span class="s5">r'(\+([a-zA-Z\d]+(\.[a-zA-Z\d]+)?))?$'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">I</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_pep_440_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s1">s </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">()</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">PEP440_VERSION_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">UnsupportedVersionError</span><span class="s4">(</span><span class="s5">'Not a valid version: %s' </span><span class="s4">% </span><span class="s1">s</span><span class="s4">)</span>
+    <span class="s1">groups </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()</span>
+    <span class="s1">nums </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">int</span><span class="s4">(</span><span class="s1">v</span><span class="s4">) </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">))</span>
+    <span class="s3">while </span><span class="s1">len</span><span class="s4">(</span><span class="s1">nums</span><span class="s4">) &gt; </span><span class="s6">1 </span><span class="s3">and </span><span class="s1">nums</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">] == </span><span class="s6">0</span><span class="s4">:</span>
+        <span class="s1">nums </span><span class="s4">= </span><span class="s1">nums</span><span class="s4">[:-</span><span class="s6">1</span><span class="s4">]</span>
+
+    <span class="s3">if not </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">0</span><span class="s4">]:</span>
+        <span class="s1">epoch </span><span class="s4">= </span><span class="s6">0</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">epoch </span><span class="s4">= </span><span class="s1">int</span><span class="s4">(</span><span class="s1">groups</span><span class="s4">[</span><span class="s6">0</span><span class="s4">][:-</span><span class="s6">1</span><span class="s4">])</span>
+    <span class="s1">pre </span><span class="s4">= </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">4</span><span class="s4">:</span><span class="s6">6</span><span class="s4">]</span>
+    <span class="s1">post </span><span class="s4">= </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">7</span><span class="s4">:</span><span class="s6">9</span><span class="s4">]</span>
+    <span class="s1">dev </span><span class="s4">= </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">10</span><span class="s4">:</span><span class="s6">12</span><span class="s4">]</span>
+    <span class="s1">local </span><span class="s4">= </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">13</span><span class="s4">]</span>
+    <span class="s3">if </span><span class="s1">pre </span><span class="s4">== (</span><span class="s3">None</span><span class="s4">, </span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s1">pre </span><span class="s4">= ()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">pre</span><span class="s4">[</span><span class="s6">1</span><span class="s4">] </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">pre </span><span class="s4">= </span><span class="s1">pre</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s6">0</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">pre </span><span class="s4">= </span><span class="s1">pre</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s1">int</span><span class="s4">(</span><span class="s1">pre</span><span class="s4">[</span><span class="s6">1</span><span class="s4">])</span>
+    <span class="s3">if </span><span class="s1">post </span><span class="s4">== (</span><span class="s3">None</span><span class="s4">, </span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s1">post </span><span class="s4">= ()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">post</span><span class="s4">[</span><span class="s6">1</span><span class="s4">] </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">post </span><span class="s4">= </span><span class="s1">post</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s6">0</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">post </span><span class="s4">= </span><span class="s1">post</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s1">int</span><span class="s4">(</span><span class="s1">post</span><span class="s4">[</span><span class="s6">1</span><span class="s4">])</span>
+    <span class="s3">if </span><span class="s1">dev </span><span class="s4">== (</span><span class="s3">None</span><span class="s4">, </span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s1">dev </span><span class="s4">= ()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">dev</span><span class="s4">[</span><span class="s6">1</span><span class="s4">] </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">dev </span><span class="s4">= </span><span class="s1">dev</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s6">0</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">dev </span><span class="s4">= </span><span class="s1">dev</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s1">int</span><span class="s4">(</span><span class="s1">dev</span><span class="s4">[</span><span class="s6">1</span><span class="s4">])</span>
+    <span class="s3">if </span><span class="s1">local </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">local </span><span class="s4">= ()</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">parts </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">part </span><span class="s3">in </span><span class="s1">local</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">):</span>
+            <span class="s0"># to ensure that numeric compares as &gt; lexicographic, avoid</span>
+            <span class="s0"># comparing them directly, but encode a tuple which ensures</span>
+            <span class="s0"># correct sorting</span>
+            <span class="s3">if </span><span class="s1">part</span><span class="s4">.</span><span class="s1">isdigit</span><span class="s4">():</span>
+                <span class="s1">part </span><span class="s4">= (</span><span class="s6">1</span><span class="s4">, </span><span class="s1">int</span><span class="s4">(</span><span class="s1">part</span><span class="s4">))</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">part </span><span class="s4">= (</span><span class="s6">0</span><span class="s4">, </span><span class="s1">part</span><span class="s4">)</span>
+            <span class="s1">parts</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">part</span><span class="s4">)</span>
+        <span class="s1">local </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">parts</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">pre</span><span class="s4">:</span>
+        <span class="s0"># either before pre-release, or final release and after</span>
+        <span class="s3">if not </span><span class="s1">post </span><span class="s3">and </span><span class="s1">dev</span><span class="s4">:</span>
+            <span class="s0"># before pre-release</span>
+            <span class="s1">pre </span><span class="s4">= (</span><span class="s5">'a'</span><span class="s4">, -</span><span class="s6">1</span><span class="s4">)     </span><span class="s0"># to sort before a0</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">pre </span><span class="s4">= (</span><span class="s5">'z'</span><span class="s4">,)        </span><span class="s0"># to sort after all pre-releases</span>
+    <span class="s0"># now look at the state of post and dev.</span>
+    <span class="s3">if not </span><span class="s1">post</span><span class="s4">:</span>
+        <span class="s1">post </span><span class="s4">= (</span><span class="s5">'_'</span><span class="s4">,)   </span><span class="s0"># sort before 'a'</span>
+    <span class="s3">if not </span><span class="s1">dev</span><span class="s4">:</span>
+        <span class="s1">dev </span><span class="s4">= (</span><span class="s5">'final'</span><span class="s4">,)</span>
+
+    <span class="s3">return </span><span class="s1">epoch</span><span class="s4">, </span><span class="s1">nums</span><span class="s4">, </span><span class="s1">pre</span><span class="s4">, </span><span class="s1">post</span><span class="s4">, </span><span class="s1">dev</span><span class="s4">, </span><span class="s1">local</span>
+
+
+<span class="s1">_normalized_key </span><span class="s4">= </span><span class="s1">_pep_440_key</span>
+
+
+<span class="s3">class </span><span class="s1">NormalizedVersion</span><span class="s4">(</span><span class="s1">Version</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;A rational version. 
+ 
+    Good: 
+        1.2         # equivalent to &quot;1.2.0&quot; 
+        1.2.0 
+        1.2a1 
+        1.2.3a2 
+        1.2.3b1 
+        1.2.3c1 
+        1.2.3.4 
+        TODO: fill this out 
+ 
+    Bad: 
+        1           # minimum two numbers 
+        1.2a        # release level must have a release serial 
+        1.2.3b 
+    &quot;&quot;&quot;</span>
+    <span class="s3">def </span><span class="s1">parse</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">_normalized_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s0"># _normalized_key loses trailing zeroes in the release</span>
+        <span class="s0"># clause, since that's needed to ensure that X.Y == X.Y.0 == X.Y.0.0</span>
+        <span class="s0"># However, PEP 440 prefix matching needs it: for example,</span>
+        <span class="s0"># (~= 1.4.5.0) matches differently to (~= 1.4.5.0.0).</span>
+        <span class="s1">m </span><span class="s4">= </span><span class="s1">PEP440_VERSION_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)      </span><span class="s0"># must succeed</span>
+        <span class="s1">groups </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_release_clause </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">int</span><span class="s4">(</span><span class="s1">v</span><span class="s4">) </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">groups</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">))</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s1">PREREL_TAGS </span><span class="s4">= </span><span class="s1">set</span><span class="s4">([</span><span class="s5">'a'</span><span class="s4">, </span><span class="s5">'b'</span><span class="s4">, </span><span class="s5">'c'</span><span class="s4">, </span><span class="s5">'rc'</span><span class="s4">, </span><span class="s5">'dev'</span><span class="s4">])</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">is_prerelease</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">any</span><span class="s4">(</span><span class="s1">t</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">PREREL_TAGS </span><span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts </span><span class="s3">if </span><span class="s1">t</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">):</span>
+    <span class="s1">x </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">x</span><span class="s4">)</span>
+    <span class="s1">y </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">y</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y</span><span class="s4">:</span>
+        <span class="s3">return True</span>
+    <span class="s3">if not </span><span class="s1">x</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s1">y</span><span class="s4">):</span>
+        <span class="s3">return False</span>
+    <span class="s1">n </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">y</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">x</span><span class="s4">[</span><span class="s1">n</span><span class="s4">] == </span><span class="s5">'.'</span>
+
+
+<span class="s3">class </span><span class="s1">NormalizedMatcher</span><span class="s4">(</span><span class="s1">Matcher</span><span class="s4">):</span>
+    <span class="s1">version_class </span><span class="s4">= </span><span class="s1">NormalizedVersion</span>
+
+    <span class="s0"># value is either a callable or the name of a method</span>
+    <span class="s1">_operators </span><span class="s4">= {</span>
+        <span class="s5">'~='</span><span class="s4">: </span><span class="s5">'_match_compatible'</span><span class="s4">,</span>
+        <span class="s5">'&lt;'</span><span class="s4">: </span><span class="s5">'_match_lt'</span><span class="s4">,</span>
+        <span class="s5">'&gt;'</span><span class="s4">: </span><span class="s5">'_match_gt'</span><span class="s4">,</span>
+        <span class="s5">'&lt;='</span><span class="s4">: </span><span class="s5">'_match_le'</span><span class="s4">,</span>
+        <span class="s5">'&gt;='</span><span class="s4">: </span><span class="s5">'_match_ge'</span><span class="s4">,</span>
+        <span class="s5">'=='</span><span class="s4">: </span><span class="s5">'_match_eq'</span><span class="s4">,</span>
+        <span class="s5">'==='</span><span class="s4">: </span><span class="s5">'_match_arbitrary'</span><span class="s4">,</span>
+        <span class="s5">'!='</span><span class="s4">: </span><span class="s5">'_match_ne'</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s3">def </span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">prefix</span><span class="s4">:</span>
+            <span class="s1">strip_local </span><span class="s4">= </span><span class="s5">'+' </span><span class="s3">not in </span><span class="s1">constraint </span><span class="s3">and </span><span class="s1">version</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s0"># both constraint and version are</span>
+            <span class="s0"># NormalizedVersion instances.</span>
+            <span class="s0"># If constraint does not have a local component,</span>
+            <span class="s0"># ensure the version doesn't, either.</span>
+            <span class="s1">strip_local </span><span class="s4">= </span><span class="s3">not </span><span class="s1">constraint</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">] </span><span class="s3">and </span><span class="s1">version</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s1">strip_local</span><span class="s4">:</span>
+            <span class="s1">s </span><span class="s4">= </span><span class="s1">version</span><span class="s4">.</span><span class="s1">_string</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'+'</span><span class="s4">, </span><span class="s6">1</span><span class="s4">)[</span><span class="s6">0</span><span class="s4">]</span>
+            <span class="s1">version </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version_class</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span>
+
+    <span class="s3">def </span><span class="s1">_match_lt</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">version </span><span class="s4">&gt;= </span><span class="s1">constraint</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s1">release_clause </span><span class="s4">= </span><span class="s1">constraint</span><span class="s4">.</span><span class="s1">_release_clause</span>
+        <span class="s1">pfx </span><span class="s4">= </span><span class="s5">'.'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">release_clause</span><span class="s4">])</span>
+        <span class="s3">return not </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">pfx</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_match_gt</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">version </span><span class="s4">&lt;= </span><span class="s1">constraint</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s1">release_clause </span><span class="s4">= </span><span class="s1">constraint</span><span class="s4">.</span><span class="s1">_release_clause</span>
+        <span class="s1">pfx </span><span class="s4">= </span><span class="s5">'.'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">release_clause</span><span class="s4">])</span>
+        <span class="s3">return not </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">pfx</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_match_le</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">version </span><span class="s4">&lt;= </span><span class="s1">constraint</span>
+
+    <span class="s3">def </span><span class="s1">_match_ge</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">version </span><span class="s4">&gt;= </span><span class="s1">constraint</span>
+
+    <span class="s3">def </span><span class="s1">_match_eq</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">if not </span><span class="s1">prefix</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= (</span><span class="s1">version </span><span class="s4">== </span><span class="s1">constraint</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">_match_arbitrary</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">str</span><span class="s4">(</span><span class="s1">version</span><span class="s4">) == </span><span class="s1">str</span><span class="s4">(</span><span class="s1">constraint</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_match_ne</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">if not </span><span class="s1">prefix</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= (</span><span class="s1">version </span><span class="s4">!= </span><span class="s1">constraint</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">not </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">_match_compatible</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s1">version</span><span class="s4">, </span><span class="s1">constraint </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_adjust_local</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">version </span><span class="s4">== </span><span class="s1">constraint</span><span class="s4">:</span>
+            <span class="s3">return True</span>
+        <span class="s3">if </span><span class="s1">version </span><span class="s4">&lt; </span><span class="s1">constraint</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+<span class="s0">#        if not prefix:</span>
+<span class="s0">#            return True</span>
+        <span class="s1">release_clause </span><span class="s4">= </span><span class="s1">constraint</span><span class="s4">.</span><span class="s1">_release_clause</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">release_clause</span><span class="s4">) &gt; </span><span class="s6">1</span><span class="s4">:</span>
+            <span class="s1">release_clause </span><span class="s4">= </span><span class="s1">release_clause</span><span class="s4">[:-</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s1">pfx </span><span class="s4">= </span><span class="s5">'.'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">release_clause</span><span class="s4">])</span>
+        <span class="s3">return </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">pfx</span><span class="s4">)</span>
+
+
+<span class="s1">_REPLACEMENTS </span><span class="s4">= (</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[.+-]$'</span><span class="s4">), </span><span class="s5">''</span><span class="s4">),                     </span><span class="s0"># remove trailing puncts</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^[.](\d)'</span><span class="s4">), </span><span class="s5">r'0.\1'</span><span class="s4">),             </span><span class="s0"># .N -&gt; 0.N at start</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'^[.-]'</span><span class="s4">), </span><span class="s5">''</span><span class="s4">),                      </span><span class="s0"># remove leading puncts</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^\((.*)\)$'</span><span class="s4">), </span><span class="s5">r'\1'</span><span class="s4">),             </span><span class="s0"># remove parentheses</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^v(ersion)?\s*(\d+)'</span><span class="s4">), </span><span class="s5">r'\2'</span><span class="s4">),    </span><span class="s0"># remove leading v(ersion)</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^r(ev)?\s*(\d+)'</span><span class="s4">), </span><span class="s5">r'\2'</span><span class="s4">),        </span><span class="s0"># remove leading v(ersion)</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[.]{2,}'</span><span class="s4">), </span><span class="s5">'.'</span><span class="s4">),                   </span><span class="s0"># multiple runs of '.'</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'\b(alfa|apha)\b'</span><span class="s4">), </span><span class="s5">'alpha'</span><span class="s4">),      </span><span class="s0"># misspelt alpha</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'\b(pre-alpha|prealpha)\b'</span><span class="s4">),</span>
+        <span class="s5">'pre.alpha'</span><span class="s4">),                               </span><span class="s0"># standardise</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'\(beta\)$'</span><span class="s4">), </span><span class="s5">'beta'</span><span class="s4">),             </span><span class="s0"># remove parentheses</span>
+<span class="s4">)</span>
+
+<span class="s1">_SUFFIX_REPLACEMENTS </span><span class="s4">= (</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'^[:~._+-]+'</span><span class="s4">), </span><span class="s5">''</span><span class="s4">),                   </span><span class="s0"># remove leading puncts</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[,*&quot;)([</span><span class="s3">\\</span><span class="s5">]]'</span><span class="s4">), </span><span class="s5">''</span><span class="s4">),                  </span><span class="s0"># remove unwanted chars</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[~:+_ -]'</span><span class="s4">), </span><span class="s5">'.'</span><span class="s4">),                    </span><span class="s0"># replace illegal chars</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[.]{2,}'</span><span class="s4">), </span><span class="s5">'.'</span><span class="s4">),                   </span><span class="s0"># multiple runs of '.'</span>
+    <span class="s4">(</span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'\.$'</span><span class="s4">), </span><span class="s5">''</span><span class="s4">),                       </span><span class="s0"># trailing '.'</span>
+<span class="s4">)</span>
+
+<span class="s1">_NUMERIC_PREFIX </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'(\d+(\.\d+)*)'</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_suggest_semantic_version</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Try to suggest a semantic form for a version for which 
+    _suggest_normalized_version couldn't come up with anything. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">result </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">().</span><span class="s1">lower</span><span class="s4">()</span>
+    <span class="s3">for </span><span class="s1">pat</span><span class="s4">, </span><span class="s1">repl </span><span class="s3">in </span><span class="s1">_REPLACEMENTS</span><span class="s4">:</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">pat</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s1">repl</span><span class="s4">, </span><span class="s1">result</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">result</span><span class="s4">:</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s5">'0.0.0'</span>
+
+    <span class="s0"># Now look for numeric prefix, and separate it out from</span>
+    <span class="s0"># the rest.</span>
+    <span class="s0"># import pdb; pdb.set_trace()</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">_NUMERIC_PREFIX</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">result</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+        <span class="s1">prefix </span><span class="s4">= </span><span class="s5">'0.0.0'</span>
+        <span class="s1">suffix </span><span class="s4">= </span><span class="s1">result</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">prefix </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()[</span><span class="s6">0</span><span class="s4">].</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">)</span>
+        <span class="s1">prefix </span><span class="s4">= [</span><span class="s1">int</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">prefix</span><span class="s4">]</span>
+        <span class="s3">while </span><span class="s1">len</span><span class="s4">(</span><span class="s1">prefix</span><span class="s4">) &lt; </span><span class="s6">3</span><span class="s4">:</span>
+            <span class="s1">prefix</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s6">0</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">prefix</span><span class="s4">) == </span><span class="s6">3</span><span class="s4">:</span>
+            <span class="s1">suffix </span><span class="s4">= </span><span class="s1">result</span><span class="s4">[</span><span class="s1">m</span><span class="s4">.</span><span class="s1">end</span><span class="s4">():]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">suffix </span><span class="s4">= </span><span class="s5">'.'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">prefix</span><span class="s4">[</span><span class="s6">3</span><span class="s4">:]]) + </span><span class="s1">result</span><span class="s4">[</span><span class="s1">m</span><span class="s4">.</span><span class="s1">end</span><span class="s4">():]</span>
+            <span class="s1">prefix </span><span class="s4">= </span><span class="s1">prefix</span><span class="s4">[:</span><span class="s6">3</span><span class="s4">]</span>
+        <span class="s1">prefix </span><span class="s4">= </span><span class="s5">'.'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">([</span><span class="s1">str</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">prefix</span><span class="s4">])</span>
+        <span class="s1">suffix </span><span class="s4">= </span><span class="s1">suffix</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">()</span>
+    <span class="s3">if </span><span class="s1">suffix</span><span class="s4">:</span>
+        <span class="s0"># import pdb; pdb.set_trace()</span>
+        <span class="s0"># massage the suffix.</span>
+        <span class="s3">for </span><span class="s1">pat</span><span class="s4">, </span><span class="s1">repl </span><span class="s3">in </span><span class="s1">_SUFFIX_REPLACEMENTS</span><span class="s4">:</span>
+            <span class="s1">suffix </span><span class="s4">= </span><span class="s1">pat</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s1">repl</span><span class="s4">, </span><span class="s1">suffix</span><span class="s4">)</span>
+
+    <span class="s3">if not </span><span class="s1">suffix</span><span class="s4">:</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">prefix</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">sep </span><span class="s4">= </span><span class="s5">'-' </span><span class="s3">if </span><span class="s5">'dev' </span><span class="s3">in </span><span class="s1">suffix </span><span class="s3">else </span><span class="s5">'+'</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">prefix </span><span class="s4">+ </span><span class="s1">sep </span><span class="s4">+ </span><span class="s1">suffix</span>
+    <span class="s3">if not </span><span class="s1">is_semver</span><span class="s4">(</span><span class="s1">result</span><span class="s4">):</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s3">None</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s3">def </span><span class="s1">_suggest_normalized_version</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Suggest a normalized version close to the given version string. 
+ 
+    If you have a version string that isn't rational (i.e. NormalizedVersion 
+    doesn't like it) then you might be able to get an equivalent (or close) 
+    rational version from this function. 
+ 
+    This does a number of simple normalizations to the given string, based 
+    on observation of versions currently in use on PyPI. Given a dump of 
+    those version during PyCon 2009, 4287 of them: 
+    - 2312 (53.93%) match NormalizedVersion without change 
+      with the automatic suggestion 
+    - 3474 (81.04%) match when using this suggestion method 
+ 
+    @param s {str} An irrational version string. 
+    @returns A rational version string, or None, if couldn't determine one. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s1">_normalized_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">s   </span><span class="s0"># already rational</span>
+    <span class="s3">except </span><span class="s1">UnsupportedVersionError</span><span class="s4">:</span>
+        <span class="s3">pass</span>
+
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">lower</span><span class="s4">()</span>
+
+    <span class="s0"># part of this could use maketrans</span>
+    <span class="s3">for </span><span class="s1">orig</span><span class="s4">, </span><span class="s1">repl </span><span class="s3">in </span><span class="s4">((</span><span class="s5">'-alpha'</span><span class="s4">, </span><span class="s5">'a'</span><span class="s4">), (</span><span class="s5">'-beta'</span><span class="s4">, </span><span class="s5">'b'</span><span class="s4">), (</span><span class="s5">'alpha'</span><span class="s4">, </span><span class="s5">'a'</span><span class="s4">),</span>
+                       <span class="s4">(</span><span class="s5">'beta'</span><span class="s4">, </span><span class="s5">'b'</span><span class="s4">), (</span><span class="s5">'rc'</span><span class="s4">, </span><span class="s5">'c'</span><span class="s4">), (</span><span class="s5">'-final'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">),</span>
+                       <span class="s4">(</span><span class="s5">'-pre'</span><span class="s4">, </span><span class="s5">'c'</span><span class="s4">),</span>
+                       <span class="s4">(</span><span class="s5">'-release'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">), (</span><span class="s5">'.release'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">), (</span><span class="s5">'-stable'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">),</span>
+                       <span class="s4">(</span><span class="s5">'+'</span><span class="s4">, </span><span class="s5">'.'</span><span class="s4">), (</span><span class="s5">'_'</span><span class="s4">, </span><span class="s5">'.'</span><span class="s4">), (</span><span class="s5">' '</span><span class="s4">, </span><span class="s5">''</span><span class="s4">), (</span><span class="s5">'.final'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">),</span>
+                       <span class="s4">(</span><span class="s5">'final'</span><span class="s4">, </span><span class="s5">''</span><span class="s4">)):</span>
+        <span class="s1">rs </span><span class="s4">= </span><span class="s1">rs</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s1">orig</span><span class="s4">, </span><span class="s1">repl</span><span class="s4">)</span>
+
+    <span class="s0"># if something ends with dev or pre, we add a 0</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;pre$&quot;</span><span class="s4">, </span><span class="s5">r&quot;pre0&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;dev$&quot;</span><span class="s4">, </span><span class="s5">r&quot;dev0&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># if we have something like &quot;b-2&quot; or &quot;a.2&quot; at the end of the</span>
+    <span class="s0"># version, that is probably beta, alpha, etc</span>
+    <span class="s0"># let's remove the dash or dot</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;([abc]|rc)[\-\.](\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;\1\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># 1.0-dev-r371 -&gt; 1.0.dev371</span>
+    <span class="s0"># 0.1-dev-r79 -&gt; 0.1.dev79</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;[\-\.](dev)[\-\.]?r?(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.\1\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Clean: 2.0.a.3, 2.0.b1, 0.9.0~c1</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;[.~]?([abc])\.?&quot;</span><span class="s4">, </span><span class="s5">r&quot;\1&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Clean: v0.3, v1.0</span>
+    <span class="s3">if </span><span class="s1">rs</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'v'</span><span class="s4">):</span>
+        <span class="s1">rs </span><span class="s4">= </span><span class="s1">rs</span><span class="s4">[</span><span class="s6">1</span><span class="s4">:]</span>
+
+    <span class="s0"># Clean leading '0's on numbers.</span>
+    <span class="s0"># TODO: unintended side-effect on, e.g., &quot;2003.05.09&quot;</span>
+    <span class="s0"># PyPI stats: 77 (~2%) better</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;\b0+(\d+)(?!\d)&quot;</span><span class="s4">, </span><span class="s5">r&quot;\1&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Clean a/b/c with no version. E.g. &quot;1.0a&quot; -&gt; &quot;1.0a0&quot;. Setuptools infers</span>
+    <span class="s0"># zero.</span>
+    <span class="s0"># PyPI stats: 245 (7.56%) better</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;(\d+[abc])$&quot;</span><span class="s4">, </span><span class="s5">r&quot;\g&lt;1&gt;0&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># the 'dev-rNNN' tag is a dev tag</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;\.?(dev-r|dev\.r)\.?(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.dev\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># clean the - when used as a pre delimiter</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;-(a|b|c)(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;\1\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># a terminal &quot;dev&quot; or &quot;devel&quot; can be changed into &quot;.dev0&quot;</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;[\.\-](dev|devel)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.dev0&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># a terminal &quot;dev&quot; can be changed into &quot;.dev0&quot;</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;(?![\.\-])dev$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.dev0&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># a terminal &quot;final&quot; or &quot;stable&quot; can be removed</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;(final|stable)$&quot;</span><span class="s4">, </span><span class="s5">&quot;&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># The 'r' and the '-' tags are post release tags</span>
+    <span class="s0">#   0.4a1.r10       -&gt;  0.4a1.post10</span>
+    <span class="s0">#   0.9.33-17222    -&gt;  0.9.33.post17222</span>
+    <span class="s0">#   0.9.33-r17222   -&gt;  0.9.33.post17222</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;\.?(r|-|-r)\.?(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.post\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Clean 'r' instead of 'dev' usage:</span>
+    <span class="s0">#   0.9.33+r17222   -&gt;  0.9.33.dev17222</span>
+    <span class="s0">#   1.0dev123       -&gt;  1.0.dev123</span>
+    <span class="s0">#   1.0.git123      -&gt;  1.0.dev123</span>
+    <span class="s0">#   1.0.bzr123      -&gt;  1.0.dev123</span>
+    <span class="s0">#   0.1a0dev.123    -&gt;  0.1a0.dev123</span>
+    <span class="s0"># PyPI stats:  ~150 (~4%) better</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;\.?(dev|git|bzr)\.?(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.dev\2&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Clean '.pre' (normalized from '-pre' above) instead of 'c' usage:</span>
+    <span class="s0">#   0.2.pre1        -&gt;  0.2c1</span>
+    <span class="s0">#   0.2-c1         -&gt;  0.2c1</span>
+    <span class="s0">#   1.0preview123   -&gt;  1.0c123</span>
+    <span class="s0"># PyPI stats: ~21 (0.62%) better</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;\.?(pre|preview|-c)(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;c\g&lt;2&gt;&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s0"># Tcl/Tk uses &quot;px&quot; for their post release markers</span>
+    <span class="s1">rs </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">r&quot;p(\d+)$&quot;</span><span class="s4">, </span><span class="s5">r&quot;.post\1&quot;</span><span class="s4">, </span><span class="s1">rs</span><span class="s4">)</span>
+
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s1">_normalized_key</span><span class="s4">(</span><span class="s1">rs</span><span class="s4">)</span>
+    <span class="s3">except </span><span class="s1">UnsupportedVersionError</span><span class="s4">:</span>
+        <span class="s1">rs </span><span class="s4">= </span><span class="s3">None</span>
+    <span class="s3">return </span><span class="s1">rs</span>
+
+<span class="s0">#</span>
+<span class="s0">#   Legacy version processing (distribute-compatible)</span>
+<span class="s0">#</span>
+
+
+<span class="s1">_VERSION_PART </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'([a-z]+|\d+|[\.-])'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">I</span><span class="s4">)</span>
+<span class="s1">_VERSION_REPLACE </span><span class="s4">= {</span>
+    <span class="s5">'pre'</span><span class="s4">: </span><span class="s5">'c'</span><span class="s4">,</span>
+    <span class="s5">'preview'</span><span class="s4">: </span><span class="s5">'c'</span><span class="s4">,</span>
+    <span class="s5">'-'</span><span class="s4">: </span><span class="s5">'final-'</span><span class="s4">,</span>
+    <span class="s5">'rc'</span><span class="s4">: </span><span class="s5">'c'</span><span class="s4">,</span>
+    <span class="s5">'dev'</span><span class="s4">: </span><span class="s5">'@'</span><span class="s4">,</span>
+    <span class="s5">''</span><span class="s4">: </span><span class="s3">None</span><span class="s4">,</span>
+    <span class="s5">'.'</span><span class="s4">: </span><span class="s3">None</span><span class="s4">,</span>
+<span class="s4">}</span>
+
+
+<span class="s3">def </span><span class="s1">_legacy_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">get_parts</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s1">result </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">p </span><span class="s3">in </span><span class="s1">_VERSION_PART</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s1">s</span><span class="s4">.</span><span class="s1">lower</span><span class="s4">()):</span>
+            <span class="s1">p </span><span class="s4">= </span><span class="s1">_VERSION_REPLACE</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">p</span><span class="s4">, </span><span class="s1">p</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">p</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s5">'0' </span><span class="s4">&lt;= </span><span class="s1">p</span><span class="s4">[:</span><span class="s6">1</span><span class="s4">] &lt;= </span><span class="s5">'9'</span><span class="s4">:</span>
+                    <span class="s1">p </span><span class="s4">= </span><span class="s1">p</span><span class="s4">.</span><span class="s1">zfill</span><span class="s4">(</span><span class="s6">8</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">p </span><span class="s4">= </span><span class="s5">'*' </span><span class="s4">+ </span><span class="s1">p</span>
+                <span class="s1">result</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">p</span><span class="s4">)</span>
+        <span class="s1">result</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s5">'*final'</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s1">result </span><span class="s4">= []</span>
+    <span class="s3">for </span><span class="s1">p </span><span class="s3">in </span><span class="s1">get_parts</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">p</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'*'</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">p </span><span class="s4">&lt; </span><span class="s5">'*final'</span><span class="s4">:</span>
+                <span class="s3">while </span><span class="s1">result </span><span class="s3">and </span><span class="s1">result</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">] == </span><span class="s5">'*final-'</span><span class="s4">:</span>
+                    <span class="s1">result</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">()</span>
+            <span class="s3">while </span><span class="s1">result </span><span class="s3">and </span><span class="s1">result</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">] == </span><span class="s5">'00000000'</span><span class="s4">:</span>
+                <span class="s1">result</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">()</span>
+        <span class="s1">result</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">p</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">result</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">LegacyVersion</span><span class="s4">(</span><span class="s1">Version</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">parse</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_legacy_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">is_prerelease</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">x</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">) </span><span class="s3">and </span><span class="s1">x</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'*'</span><span class="s4">) </span><span class="s3">and </span><span class="s1">x </span><span class="s4">&lt; </span><span class="s5">'*final'</span><span class="s4">):</span>
+                <span class="s1">result </span><span class="s4">= </span><span class="s3">True</span>
+                <span class="s3">break</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s3">class </span><span class="s1">LegacyMatcher</span><span class="s4">(</span><span class="s1">Matcher</span><span class="s4">):</span>
+    <span class="s1">version_class </span><span class="s4">= </span><span class="s1">LegacyVersion</span>
+
+    <span class="s1">_operators </span><span class="s4">= </span><span class="s1">dict</span><span class="s4">(</span><span class="s1">Matcher</span><span class="s4">.</span><span class="s1">_operators</span><span class="s4">)</span>
+    <span class="s1">_operators</span><span class="s4">[</span><span class="s5">'~='</span><span class="s4">] = </span><span class="s5">'_match_compatible'</span>
+
+    <span class="s1">numeric_re </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^(\d+(\.\d+)*)'</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_match_compatible</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">, </span><span class="s1">prefix</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">version </span><span class="s4">&lt; </span><span class="s1">constraint</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s1">m </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">numeric_re</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">constraint</span><span class="s4">))</span>
+        <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">warning</span><span class="s4">(</span><span class="s5">'Cannot compute compatible match for version %s '</span>
+                           <span class="s5">' and constraint %s'</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">constraint</span><span class="s4">)</span>
+            <span class="s3">return True</span>
+        <span class="s1">s </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()[</span><span class="s6">0</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s5">'.' </span><span class="s3">in </span><span class="s1">s</span><span class="s4">:</span>
+            <span class="s1">s </span><span class="s4">= </span><span class="s1">s</span><span class="s4">.</span><span class="s1">rsplit</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">, </span><span class="s6">1</span><span class="s4">)[</span><span class="s6">0</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">_match_prefix</span><span class="s4">(</span><span class="s1">version</span><span class="s4">, </span><span class="s1">s</span><span class="s4">)</span>
+
+<span class="s0">#</span>
+<span class="s0">#   Semantic versioning</span>
+<span class="s0">#</span>
+
+
+<span class="s1">_SEMVER_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^(\d+)\.(\d+)\.(\d+)'</span>
+                        <span class="s5">r'(-[a-z0-9]+(\.[a-z0-9-]+)*)?'</span>
+                        <span class="s5">r'(\+[a-z0-9]+(\.[a-z0-9-]+)*)?$'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">I</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">is_semver</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s1">_SEMVER_RE</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_semantic_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">make_tuple</span><span class="s4">(</span><span class="s1">s</span><span class="s4">, </span><span class="s1">absent</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">s </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= (</span><span class="s1">absent</span><span class="s4">,)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">parts </span><span class="s4">= </span><span class="s1">s</span><span class="s4">[</span><span class="s6">1</span><span class="s4">:].</span><span class="s1">split</span><span class="s4">(</span><span class="s5">'.'</span><span class="s4">)</span>
+            <span class="s0"># We can't compare ints and strings on Python 3, so fudge it</span>
+            <span class="s0"># by zero-filling numeric values so simulate a numeric comparison</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">([</span><span class="s1">p</span><span class="s4">.</span><span class="s1">zfill</span><span class="s4">(</span><span class="s6">8</span><span class="s4">) </span><span class="s3">if </span><span class="s1">p</span><span class="s4">.</span><span class="s1">isdigit</span><span class="s4">() </span><span class="s3">else </span><span class="s1">p </span><span class="s3">for </span><span class="s1">p </span><span class="s3">in </span><span class="s1">parts</span><span class="s4">])</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">is_semver</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">UnsupportedVersionError</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+    <span class="s1">groups </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()</span>
+    <span class="s1">major</span><span class="s4">, </span><span class="s1">minor</span><span class="s4">, </span><span class="s1">patch </span><span class="s4">= [</span><span class="s1">int</span><span class="s4">(</span><span class="s1">i</span><span class="s4">) </span><span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">groups</span><span class="s4">[:</span><span class="s6">3</span><span class="s4">]]</span>
+    <span class="s0"># choose the '|' and '*' so that versions sort correctly</span>
+    <span class="s1">pre</span><span class="s4">, </span><span class="s1">build </span><span class="s4">= </span><span class="s1">make_tuple</span><span class="s4">(</span><span class="s1">groups</span><span class="s4">[</span><span class="s6">3</span><span class="s4">], </span><span class="s5">'|'</span><span class="s4">), </span><span class="s1">make_tuple</span><span class="s4">(</span><span class="s1">groups</span><span class="s4">[</span><span class="s6">5</span><span class="s4">], </span><span class="s5">'*'</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">major</span><span class="s4">, </span><span class="s1">minor</span><span class="s4">, </span><span class="s1">patch</span><span class="s4">), </span><span class="s1">pre</span><span class="s4">, </span><span class="s1">build</span>
+
+
+<span class="s3">class </span><span class="s1">SemanticVersion</span><span class="s4">(</span><span class="s1">Version</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">parse</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_semantic_key</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">is_prerelease</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_parts</span><span class="s4">[</span><span class="s6">1</span><span class="s4">][</span><span class="s6">0</span><span class="s4">] != </span><span class="s5">'|'</span>
+
+
+<span class="s3">class </span><span class="s1">SemanticMatcher</span><span class="s4">(</span><span class="s1">Matcher</span><span class="s4">):</span>
+    <span class="s1">version_class </span><span class="s4">= </span><span class="s1">SemanticVersion</span>
+
+
+<span class="s3">class </span><span class="s1">VersionScheme</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">matcher</span><span class="s4">, </span><span class="s1">suggester</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">= </span><span class="s1">key</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">matcher </span><span class="s4">= </span><span class="s1">matcher</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">suggester </span><span class="s4">= </span><span class="s1">suggester</span>
+
+    <span class="s3">def </span><span class="s1">is_valid_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">matcher</span><span class="s4">.</span><span class="s1">version_class</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">except </span><span class="s1">UnsupportedVersionError</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">is_valid_matcher</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">matcher</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">except </span><span class="s1">UnsupportedVersionError</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">is_valid_constraint_list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Used for processing some metadata fields 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># See issue #140. Be tolerant of a single trailing comma.</span>
+        <span class="s3">if </span><span class="s1">s</span><span class="s4">.</span><span class="s1">endswith</span><span class="s4">(</span><span class="s5">','</span><span class="s4">):</span>
+            <span class="s1">s </span><span class="s4">= </span><span class="s1">s</span><span class="s4">[:-</span><span class="s6">1</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">is_valid_matcher</span><span class="s4">(</span><span class="s5">'dummy_name (%s)' </span><span class="s4">% </span><span class="s1">s</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">suggest</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">suggester </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">suggester</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s1">_SCHEMES </span><span class="s4">= {</span>
+    <span class="s5">'normalized'</span><span class="s4">: </span><span class="s1">VersionScheme</span><span class="s4">(</span><span class="s1">_normalized_key</span><span class="s4">, </span><span class="s1">NormalizedMatcher</span><span class="s4">,</span>
+                                <span class="s1">_suggest_normalized_version</span><span class="s4">),</span>
+    <span class="s5">'legacy'</span><span class="s4">: </span><span class="s1">VersionScheme</span><span class="s4">(</span><span class="s1">_legacy_key</span><span class="s4">, </span><span class="s1">LegacyMatcher</span><span class="s4">, </span><span class="s3">lambda </span><span class="s1">self</span><span class="s4">, </span><span class="s1">s</span><span class="s4">: </span><span class="s1">s</span><span class="s4">),</span>
+    <span class="s5">'semantic'</span><span class="s4">: </span><span class="s1">VersionScheme</span><span class="s4">(</span><span class="s1">_semantic_key</span><span class="s4">, </span><span class="s1">SemanticMatcher</span><span class="s4">,</span>
+                              <span class="s1">_suggest_semantic_version</span><span class="s4">),</span>
+<span class="s4">}</span>
+
+<span class="s1">_SCHEMES</span><span class="s4">[</span><span class="s5">'default'</span><span class="s4">] = </span><span class="s1">_SCHEMES</span><span class="s4">[</span><span class="s5">'normalized'</span><span class="s4">]</span>
+
+
+<span class="s3">def </span><span class="s1">get_scheme</span><span class="s4">(</span><span class="s1">name</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">name </span><span class="s3">not in </span><span class="s1">_SCHEMES</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'unknown scheme name: %r' </span><span class="s4">% </span><span class="s1">name</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">_SCHEMES</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+</pre>
+</body>
+</html>

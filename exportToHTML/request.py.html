@@ -1,0 +1,159 @@
+<html>
+<head>
+<title>request.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+request.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">from </span><span class="s1">base64 </span><span class="s0">import </span><span class="s1">b64encode</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">exceptions </span><span class="s0">import </span><span class="s1">UnrewindableBodyError</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">packages</span><span class="s2">.</span><span class="s1">six </span><span class="s0">import </span><span class="s1">b</span><span class="s2">, </span><span class="s1">integer_types</span>
+
+<span class="s3"># Pass as a value within ``headers`` to skip</span>
+<span class="s3"># emitting some HTTP headers that are added automatically.</span>
+<span class="s3"># The only headers that are supported are ``Accept-Encoding``,</span>
+<span class="s3"># ``Host``, and ``User-Agent``.</span>
+<span class="s1">SKIP_HEADER </span><span class="s2">= </span><span class="s4">&quot;@@@SKIP_HEADER@@@&quot;</span>
+<span class="s1">SKIPPABLE_HEADERS </span><span class="s2">= </span><span class="s1">frozenset</span><span class="s2">([</span><span class="s4">&quot;accept-encoding&quot;</span><span class="s2">, </span><span class="s4">&quot;host&quot;</span><span class="s2">, </span><span class="s4">&quot;user-agent&quot;</span><span class="s2">])</span>
+
+<span class="s1">ACCEPT_ENCODING </span><span class="s2">= </span><span class="s4">&quot;gzip,deflate&quot;</span>
+
+<span class="s1">_FAILEDTELL </span><span class="s2">= </span><span class="s1">object</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">make_headers</span><span class="s2">(</span>
+    <span class="s1">keep_alive</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">accept_encoding</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">user_agent</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">basic_auth</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">proxy_basic_auth</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">disable_cache</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+<span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Shortcuts for generating request headers. 
+ 
+    :param keep_alive: 
+        If ``True``, adds 'connection: keep-alive' header. 
+ 
+    :param accept_encoding: 
+        Can be a boolean, list, or string. 
+        ``True`` translates to 'gzip,deflate'. 
+        List will get joined by comma. 
+        String will be used as provided. 
+ 
+    :param user_agent: 
+        String representing the user-agent you want, such as 
+        &quot;python-urllib3/0.6&quot; 
+ 
+    :param basic_auth: 
+        Colon-separated username:password string for 'authorization: basic ...' 
+        auth header. 
+ 
+    :param proxy_basic_auth: 
+        Colon-separated username:password string for 'proxy-authorization: basic ...' 
+        auth header. 
+ 
+    :param disable_cache: 
+        If ``True``, adds 'cache-control: no-cache' header. 
+ 
+    Example:: 
+ 
+        &gt;&gt;&gt; make_headers(keep_alive=True, user_agent=&quot;Batman/1.0&quot;) 
+        {'connection': 'keep-alive', 'user-agent': 'Batman/1.0'} 
+        &gt;&gt;&gt; make_headers(accept_encoding=True) 
+        {'accept-encoding': 'gzip,deflate'} 
+    &quot;&quot;&quot;</span>
+    <span class="s1">headers </span><span class="s2">= {}</span>
+    <span class="s0">if </span><span class="s1">accept_encoding</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">accept_encoding</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">accept_encoding</span><span class="s2">, </span><span class="s1">list</span><span class="s2">):</span>
+            <span class="s1">accept_encoding </span><span class="s2">= </span><span class="s4">&quot;,&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">accept_encoding</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">accept_encoding </span><span class="s2">= </span><span class="s1">ACCEPT_ENCODING</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;accept-encoding&quot;</span><span class="s2">] = </span><span class="s1">accept_encoding</span>
+
+    <span class="s0">if </span><span class="s1">user_agent</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;user-agent&quot;</span><span class="s2">] = </span><span class="s1">user_agent</span>
+
+    <span class="s0">if </span><span class="s1">keep_alive</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;connection&quot;</span><span class="s2">] = </span><span class="s4">&quot;keep-alive&quot;</span>
+
+    <span class="s0">if </span><span class="s1">basic_auth</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;authorization&quot;</span><span class="s2">] = </span><span class="s4">&quot;Basic &quot; </span><span class="s2">+ </span><span class="s1">b64encode</span><span class="s2">(</span><span class="s1">b</span><span class="s2">(</span><span class="s1">basic_auth</span><span class="s2">)).</span><span class="s1">decode</span><span class="s2">(</span><span class="s4">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">proxy_basic_auth</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;proxy-authorization&quot;</span><span class="s2">] = </span><span class="s4">&quot;Basic &quot; </span><span class="s2">+ </span><span class="s1">b64encode</span><span class="s2">(</span>
+            <span class="s1">b</span><span class="s2">(</span><span class="s1">proxy_basic_auth</span><span class="s2">)</span>
+        <span class="s2">).</span><span class="s1">decode</span><span class="s2">(</span><span class="s4">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">disable_cache</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">[</span><span class="s4">&quot;cache-control&quot;</span><span class="s2">] = </span><span class="s4">&quot;no-cache&quot;</span>
+
+    <span class="s0">return </span><span class="s1">headers</span>
+
+
+<span class="s0">def </span><span class="s1">set_file_position</span><span class="s2">(</span><span class="s1">body</span><span class="s2">, </span><span class="s1">pos</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    If a position is provided, move file to that point. 
+    Otherwise, we'll attempt to record a position for future use. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">pos </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">rewind_body</span><span class="s2">(</span><span class="s1">body</span><span class="s2">, </span><span class="s1">pos</span><span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">body</span><span class="s2">, </span><span class="s4">&quot;tell&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">) </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">pos </span><span class="s2">= </span><span class="s1">body</span><span class="s2">.</span><span class="s1">tell</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s2">(</span><span class="s1">IOError</span><span class="s2">, </span><span class="s1">OSError</span><span class="s2">):</span>
+            <span class="s3"># This differentiates from None, allowing us to catch</span>
+            <span class="s3"># a failed `tell()` later when trying to rewind the body.</span>
+            <span class="s1">pos </span><span class="s2">= </span><span class="s1">_FAILEDTELL</span>
+
+    <span class="s0">return </span><span class="s1">pos</span>
+
+
+<span class="s0">def </span><span class="s1">rewind_body</span><span class="s2">(</span><span class="s1">body</span><span class="s2">, </span><span class="s1">body_pos</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Attempt to rewind body to a certain position. 
+    Primarily used for request redirects and retries. 
+ 
+    :param body: 
+        File-like object that supports seek. 
+ 
+    :param int pos: 
+        Position to seek to in file. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">body_seek </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">body</span><span class="s2">, </span><span class="s4">&quot;seek&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">body_seek </span><span class="s0">is not None and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">body_pos</span><span class="s2">, </span><span class="s1">integer_types</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">body_seek</span><span class="s2">(</span><span class="s1">body_pos</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s2">(</span><span class="s1">IOError</span><span class="s2">, </span><span class="s1">OSError</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">UnrewindableBodyError</span><span class="s2">(</span>
+                <span class="s4">&quot;An error occurred when rewinding request body for redirect/retry.&quot;</span>
+            <span class="s2">)</span>
+    <span class="s0">elif </span><span class="s1">body_pos </span><span class="s0">is </span><span class="s1">_FAILEDTELL</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">UnrewindableBodyError</span><span class="s2">(</span>
+            <span class="s4">&quot;Unable to record file position for rewinding &quot;</span>
+            <span class="s4">&quot;request body during a redirect/retry.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+            <span class="s4">&quot;body_pos must be of type integer, instead it was %s.&quot; </span><span class="s2">% </span><span class="s1">type</span><span class="s2">(</span><span class="s1">body_pos</span><span class="s2">)</span>
+        <span class="s2">)</span>
+</pre>
+</body>
+</html>

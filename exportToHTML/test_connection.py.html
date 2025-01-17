@@ -1,0 +1,1145 @@
+<html>
+<head>
+<title>test_connection.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_connection.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span><span class="s2">, </span><span class="s1">cast</span><span class="s2">, </span><span class="s1">Dict</span><span class="s2">, </span><span class="s1">List</span><span class="s2">, </span><span class="s1">Optional</span><span class="s2">, </span><span class="s1">Tuple</span><span class="s2">, </span><span class="s1">Type</span>
+
+<span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_connection </span><span class="s0">import </span><span class="s1">_body_framing</span><span class="s2">, </span><span class="s1">_keep_alive</span><span class="s2">, </span><span class="s1">Connection</span><span class="s2">, </span><span class="s1">NEED_DATA</span><span class="s2">, </span><span class="s1">PAUSED</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_events </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">ConnectionClosed</span><span class="s2">,</span>
+    <span class="s1">Data</span><span class="s2">,</span>
+    <span class="s1">EndOfMessage</span><span class="s2">,</span>
+    <span class="s1">Event</span><span class="s2">,</span>
+    <span class="s1">InformationalResponse</span><span class="s2">,</span>
+    <span class="s1">Request</span><span class="s2">,</span>
+    <span class="s1">Response</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_state </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">CLIENT</span><span class="s2">,</span>
+    <span class="s1">CLOSED</span><span class="s2">,</span>
+    <span class="s1">DONE</span><span class="s2">,</span>
+    <span class="s1">ERROR</span><span class="s2">,</span>
+    <span class="s1">IDLE</span><span class="s2">,</span>
+    <span class="s1">MIGHT_SWITCH_PROTOCOL</span><span class="s2">,</span>
+    <span class="s1">MUST_CLOSE</span><span class="s2">,</span>
+    <span class="s1">SEND_BODY</span><span class="s2">,</span>
+    <span class="s1">SEND_RESPONSE</span><span class="s2">,</span>
+    <span class="s1">SERVER</span><span class="s2">,</span>
+    <span class="s1">SWITCHED_PROTOCOL</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">LocalProtocolError</span><span class="s2">, </span><span class="s1">RemoteProtocolError</span><span class="s2">, </span><span class="s1">Sentinel</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">helpers </span><span class="s0">import </span><span class="s1">ConnectionPair</span><span class="s2">, </span><span class="s1">get_all_events</span><span class="s2">, </span><span class="s1">receive_and_get</span>
+
+
+<span class="s0">def </span><span class="s1">test__keep_alive</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">assert </span><span class="s1">_keep_alive</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;Example.com&quot;</span><span class="s2">)])</span>
+    <span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;Example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;close&quot;</span><span class="s2">)],</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;Example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;a, b, cLOse, foo&quot;</span><span class="s2">)],</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s2">)</span>
+
+    <span class="s0">assert </span><span class="s1">_keep_alive</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;close&quot;</span><span class="s2">)]))</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span>
+        <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;a, b, cLOse, foo&quot;</span><span class="s2">)])</span>
+    <span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">_keep_alive</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">))  </span><span class="s4"># type: ignore[arg-type]</span>
+
+
+<span class="s0">def </span><span class="s1">test__body_framing</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">headers</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">], </span><span class="s1">te</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">) </span><span class="s1">-&gt; List</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s1">headers </span><span class="s2">= []</span>
+        <span class="s0">if </span><span class="s1">cl </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">)))</span>
+        <span class="s0">if </span><span class="s1">te</span><span class="s2">:</span>
+            <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">))</span>
+        <span class="s0">return </span><span class="s1">headers</span>
+
+    <span class="s0">def </span><span class="s1">resp</span><span class="s2">(</span>
+        <span class="s1">status_code</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s5">200</span><span class="s2">, </span><span class="s1">cl</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">te</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s2">) </span><span class="s1">-&gt; Response</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s1">status_code</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s1">headers</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">, </span><span class="s1">te</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">req</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">te</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">) </span><span class="s1">-&gt; Request</span><span class="s2">:</span>
+        <span class="s1">h </span><span class="s2">= </span><span class="s1">headers</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">, </span><span class="s1">te</span><span class="s2">)</span>
+        <span class="s1">h </span><span class="s2">+= [(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)]</span>
+        <span class="s0">return </span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s1">h</span><span class="s2">)</span>
+
+    <span class="s4"># Special cases where the headers are ignored:</span>
+    <span class="s0">for </span><span class="s1">kwargs </span><span class="s0">in </span><span class="s2">[{}, {</span><span class="s3">&quot;cl&quot;</span><span class="s2">: </span><span class="s5">100</span><span class="s2">}, {</span><span class="s3">&quot;te&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">}, {</span><span class="s3">&quot;cl&quot;</span><span class="s2">: </span><span class="s5">100</span><span class="s2">, </span><span class="s3">&quot;te&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">}]:</span>
+        <span class="s1">kwargs </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">], </span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r </span><span class="s0">in </span><span class="s2">[</span>
+            <span class="s2">(</span><span class="s6">b&quot;HEAD&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">(**</span><span class="s1">kwargs</span><span class="s2">)),</span>
+            <span class="s2">(</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">204</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+            <span class="s2">(</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">304</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)),</span>
+        <span class="s2">]:</span>
+            <span class="s0">assert </span><span class="s1">_body_framing</span><span class="s2">(</span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r</span><span class="s2">) == (</span><span class="s3">&quot;content-length&quot;</span><span class="s2">, (</span><span class="s5">0</span><span class="s2">,))</span>
+
+    <span class="s4"># Transfer-encoding</span>
+    <span class="s0">for </span><span class="s1">kwargs </span><span class="s0">in </span><span class="s2">[{</span><span class="s3">&quot;te&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">}, {</span><span class="s3">&quot;cl&quot;</span><span class="s2">: </span><span class="s5">100</span><span class="s2">, </span><span class="s3">&quot;te&quot;</span><span class="s2">: </span><span class="s0">True</span><span class="s2">}]:</span>
+        <span class="s1">kwargs </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Any</span><span class="s2">], </span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r </span><span class="s0">in </span><span class="s2">[(</span><span class="s0">None</span><span class="s2">, </span><span class="s1">req</span><span class="s2">(**</span><span class="s1">kwargs</span><span class="s2">)), (</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">(**</span><span class="s1">kwargs</span><span class="s2">))]:  </span><span class="s4"># type: ignore</span>
+            <span class="s0">assert </span><span class="s1">_body_framing</span><span class="s2">(</span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r</span><span class="s2">) == (</span><span class="s3">&quot;chunked&quot;</span><span class="s2">, ())</span>
+
+    <span class="s4"># Content-Length</span>
+    <span class="s0">for </span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r </span><span class="s0">in </span><span class="s2">[(</span><span class="s0">None</span><span class="s2">, </span><span class="s1">req</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">=</span><span class="s5">100</span><span class="s2">)), (</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">(</span><span class="s1">cl</span><span class="s2">=</span><span class="s5">100</span><span class="s2">))]:  </span><span class="s4"># type: ignore</span>
+        <span class="s0">assert </span><span class="s1">_body_framing</span><span class="s2">(</span><span class="s1">meth</span><span class="s2">, </span><span class="s1">r</span><span class="s2">) == (</span><span class="s3">&quot;content-length&quot;</span><span class="s2">, (</span><span class="s5">100</span><span class="s2">,))</span>
+
+    <span class="s4"># No headers</span>
+    <span class="s0">assert </span><span class="s1">_body_framing</span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s1">req</span><span class="s2">()) == (</span><span class="s3">&quot;content-length&quot;</span><span class="s2">, (</span><span class="s5">0</span><span class="s2">,))  </span><span class="s4"># type: ignore</span>
+    <span class="s0">assert </span><span class="s1">_body_framing</span><span class="s2">(</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">()) == (</span><span class="s3">&quot;http/1.0&quot;</span><span class="s2">, ())</span>
+
+
+<span class="s0">def </span><span class="s1">test_Connection_basics_and_content_length</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">):</span>
+        <span class="s1">Connection</span><span class="s2">(</span><span class="s3">&quot;CLIENT&quot;</span><span class="s2">)  </span><span class="s4"># type: ignore</span>
+
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">our_role </span><span class="s0">is </span><span class="s1">CLIENT</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">their_role </span><span class="s0">is </span><span class="s1">SERVER</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">our_role </span><span class="s0">is </span><span class="s1">SERVER</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">their_role </span><span class="s0">is </span><span class="s1">CLIENT</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;10&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== (</span>
+        <span class="s6">b&quot;GET / HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">&quot; b&quot;Host: example.com</span><span class="s0">\r\n</span><span class="s6">&quot; b&quot;Content-Length: 10</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">SEND_BODY</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">SEND_RESPONSE</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">SEND_RESPONSE</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">SEND_BODY</span>
+
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">their_http_version </span><span class="s0">is None</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">their_http_version </span><span class="s2">== </span><span class="s6">b&quot;1.1&quot;</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">100</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 100 </span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;11&quot;</span><span class="s2">)]))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">Content-Length: 11</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">their_http_version </span><span class="s2">== </span><span class="s6">b&quot;1.1&quot;</span>
+    <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">their_http_version </span><span class="s2">== </span><span class="s6">b&quot;1.1&quot;</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;12345&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;67890&quot;</span><span class="s2">), </span><span class="s1">expect</span><span class="s2">=[</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;67890&quot;</span><span class="s2">), </span><span class="s1">EndOfMessage</span><span class="s2">()]</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;67890&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">(), </span><span class="s1">expect</span><span class="s2">=[])</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;&quot;</span>
+
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1234567890&quot;</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;1234567890&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1&quot;</span><span class="s2">), </span><span class="s1">expect</span><span class="s2">=[</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1&quot;</span><span class="s2">), </span><span class="s1">EndOfMessage</span><span class="s2">()])</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;1&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">(), </span><span class="s1">expect</span><span class="s2">=[])</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;&quot;</span>
+
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_chunked</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+    <span class="s2">)</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1234567890&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;a</span><span class="s0">\r\n</span><span class="s6">1234567890</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;abcde&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;5</span><span class="s0">\r\n</span><span class="s6">abcde</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;&quot;</span><span class="s2">), </span><span class="s1">expect</span><span class="s2">=[])</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;&quot;</span>
+    <span class="s1">data </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;hello&quot;</span><span class="s2">, </span><span class="s3">&quot;there&quot;</span><span class="s2">)]))</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;0</span><span class="s0">\r\n</span><span class="s6">hello: there</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)])</span>
+    <span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;54321&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">))</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">))</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_chunk_boundaries</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">conn </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">our_role</span><span class="s2">=</span><span class="s1">SERVER</span><span class="s2">)</span>
+
+    <span class="s1">request </span><span class="s2">= (</span>
+        <span class="s6">b&quot;POST / HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;Host: example.com</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;Transfer-Encoding: chunked</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s1">request</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Request</span><span class="s2">(</span>
+        <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;POST&quot;</span><span class="s2">,</span>
+        <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+        <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)],</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;5</span><span class="s0">\r\n</span><span class="s6">hello</span><span class="s0">\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;hello&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;5</span><span class="s0">\r\n</span><span class="s6">hel&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;hel&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;l&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;l&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;o</span><span class="s0">\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;o&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;5</span><span class="s0">\r\n</span><span class="s6">hello&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;hello&quot;</span><span class="s2">, </span><span class="s1">chunk_start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">chunk_end</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s0">\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">NEED_DATA</span>
+
+    <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">EndOfMessage</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_client_talking_to_http10_server</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)]))</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s4"># No content-length, so Http10 framing for body</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;HTTP/1.0 200 OK</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">) == [</span>
+        <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">=</span><span class="s6">b&quot;OK&quot;</span><span class="s2">)  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;12345&quot;</span><span class="s2">) == [</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;67890&quot;</span><span class="s2">) == [</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;67890&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;&quot;</span><span class="s2">) == [</span><span class="s1">EndOfMessage</span><span class="s2">(), </span><span class="s1">ConnectionClosed</span><span class="s2">()]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">CLOSED</span>
+
+
+<span class="s0">def </span><span class="s1">test_server_talking_to_http10_client</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s4"># No content-length, so no body</span>
+    <span class="s4"># NB: no host header</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">),  </span><span class="s4"># type: ignore[arg-type]</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+
+    <span class="s4"># We automatically Connection: close back at them</span>
+    <span class="s0">assert </span><span class="s2">(</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+        <span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">Connection: close</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">)) == </span><span class="s6">b&quot;12345&quot;</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">()) == </span><span class="s6">b&quot;&quot;</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+
+    <span class="s4"># Check that it works if they do send Content-Length</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s4"># NB: no host header</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;POST / HTTP/1.0</span><span class="s0">\r\n</span><span class="s6">Content-Length: 10</span><span class="s0">\r\n\r\n</span><span class="s6">1&quot;</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;POST&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;10&quot;</span><span class="s2">)],</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">,</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1&quot;</span><span class="s2">),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;234567890&quot;</span><span class="s2">) == [</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;234567890&quot;</span><span class="s2">), </span><span class="s1">EndOfMessage</span><span class="s2">()]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+    <span class="s0">assert </span><span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;&quot;</span><span class="s2">) == [</span><span class="s1">ConnectionClosed</span><span class="s2">()]</span>
+
+
+<span class="s0">def </span><span class="s1">test_automatic_transfer_encoding_in_response</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># Check that in responses, the user can specify either Transfer-Encoding:</span>
+    <span class="s4"># chunked or no framing at all, and in both cases we automatically select</span>
+    <span class="s4"># the right option depending on whether the peer speaks HTTP/1.0 or</span>
+    <span class="s4"># HTTP/1.1</span>
+    <span class="s0">for </span><span class="s1">user_headers </span><span class="s0">in </span><span class="s2">[</span>
+        <span class="s2">[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)],</span>
+        <span class="s2">[],</span>
+        <span class="s4"># In fact, this even works if Content-Length is set,</span>
+        <span class="s4"># because if both are set then Transfer-Encoding wins</span>
+        <span class="s2">[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;100&quot;</span><span class="s2">)],</span>
+    <span class="s2">]:</span>
+        <span class="s1">user_headers </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">List</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]], </span><span class="s1">user_headers</span><span class="s2">)</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+            <span class="s1">CLIENT</span><span class="s2">,</span>
+            <span class="s2">[</span>
+                <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)]),</span>
+                <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+            <span class="s2">],</span>
+        <span class="s2">)</span>
+        <span class="s4"># When speaking to HTTP/1.1 client, all of the above cases get</span>
+        <span class="s4"># normalized to Transfer-Encoding: chunked</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+            <span class="s1">SERVER</span><span class="s2">,</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s1">user_headers</span><span class="s2">),</span>
+            <span class="s1">expect</span><span class="s2">=</span><span class="s1">Response</span><span class="s2">(</span>
+                <span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)]</span>
+            <span class="s2">),</span>
+        <span class="s2">)</span>
+
+        <span class="s4"># When speaking to HTTP/1.0 client, all of the above cases get</span>
+        <span class="s4"># normalized to no-framing-headers</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+        <span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s2">(</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s1">user_headers</span><span class="s2">))</span>
+            <span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">Connection: close</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">)) == </span><span class="s6">b&quot;12345&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">test_automagic_connection_close_handling</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s4"># If the user explicitly sets Connection: close, then we notice and</span>
+    <span class="s4"># respect it</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;close&quot;</span><span class="s2">)],</span>
+            <span class="s2">),</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">MUST_CLOSE</span>
+    <span class="s4"># And if the client sets it, the server automatically echoes it back</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">SERVER</span><span class="s2">,</span>
+        <span class="s4"># no header here...</span>
+        <span class="s2">[</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">204</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]), </span><span class="s1">EndOfMessage</span><span class="s2">()],  </span><span class="s4"># type: ignore[arg-type]</span>
+        <span class="s4"># ...but oh look, it arrived anyway</span>
+        <span class="s1">expect</span><span class="s2">=[</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">204</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;connection&quot;</span><span class="s2">, </span><span class="s3">&quot;close&quot;</span><span class="s2">)]),</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_100_continue</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">setup</span><span class="s2">() </span><span class="s1">-&gt; ConnectionPair</span><span class="s2">:</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+            <span class="s1">CLIENT</span><span class="s2">,</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[</span>
+                    <span class="s2">(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">),</span>
+                    <span class="s2">(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;100&quot;</span><span class="s2">),</span>
+                    <span class="s2">(</span><span class="s3">&quot;Expect&quot;</span><span class="s2">, </span><span class="s3">&quot;100-continue&quot;</span><span class="s2">),</span>
+                <span class="s2">],</span>
+            <span class="s2">),</span>
+        <span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">client_is_waiting_for_100_continue</span>
+        <span class="s0">assert not </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">they_are_waiting_for_100_continue</span>
+        <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">they_are_waiting_for_100_continue</span>
+        <span class="s0">return </span><span class="s1">p</span>
+
+    <span class="s4"># Disabled by 100 Continue</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">100</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">client_is_waiting_for_100_continue</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">they_are_waiting_for_100_continue</span>
+
+    <span class="s4"># Disabled by a real response</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)])</span>
+    <span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">client_is_waiting_for_100_continue</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">they_are_waiting_for_100_continue</span>
+
+    <span class="s4"># Disabled by the client going ahead and sending stuff anyway</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">))</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">client_is_waiting_for_100_continue</span>
+        <span class="s0">assert not </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">they_are_waiting_for_100_continue</span>
+
+
+<span class="s0">def </span><span class="s1">test_max_incomplete_event_size_countermeasure</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># Infinitely long headers are definitely not okay</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n</span><span class="s6">Endless: &quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s0">while True</span><span class="s2">:</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;a&quot; </span><span class="s2">* </span><span class="s5">1024</span><span class="s2">)</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+    <span class="s4"># Checking that the same header is accepted / rejected depending on the</span>
+    <span class="s4"># max_incomplete_event_size setting:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">max_incomplete_event_size</span><span class="s2">=</span><span class="s5">5000</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n</span><span class="s6">Big: &quot;</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;a&quot; </span><span class="s2">* </span><span class="s5">4000</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;big&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot; </span><span class="s2">* </span><span class="s5">4000</span><span class="s2">)]</span>
+        <span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">max_incomplete_event_size</span><span class="s2">=</span><span class="s5">4000</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n</span><span class="s6">Big: &quot;</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;a&quot; </span><span class="s2">* </span><span class="s5">4000</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+    <span class="s4"># Temporarily exceeding the size limit is fine, as long as its done with</span>
+    <span class="s4"># complete events:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">max_incomplete_event_size</span><span class="s2">=</span><span class="s5">5000</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n</span><span class="s6">Content-Length: 10000&quot;</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s0">\r\n\r\n</span><span class="s6">&quot; </span><span class="s2">+ </span><span class="s6">b&quot;a&quot; </span><span class="s2">* </span><span class="s5">10000</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;10000&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;a&quot; </span><span class="s2">* </span><span class="s5">10000</span><span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">max_incomplete_event_size</span><span class="s2">=</span><span class="s5">100</span><span class="s2">)</span>
+    <span class="s4"># Two pipelined requests to create a way-too-big receive buffer... but</span>
+    <span class="s4"># it's fine because we're not checking</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+        <span class="s6">b&quot;GET /1 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;GET /2 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: b</span><span class="s0">\r\n\r\n</span><span class="s6">&quot; </span><span class="s2">+ </span><span class="s6">b&quot;X&quot; </span><span class="s2">* </span><span class="s5">1000</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/1&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s4"># Even more data comes in, still no problem</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;X&quot; </span><span class="s2">* </span><span class="s5">1000</span><span class="s2">)</span>
+    <span class="s4"># We can respond and reuse to get the second pipelined request</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/2&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;host&quot;</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">)]),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s4"># But once we unpause and try to read the next message, and find that it's</span>
+    <span class="s4"># incomplete and the buffer is *still* way too large, then *that's* a</span>
+    <span class="s4"># problem:</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_reuse_simple</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s2">[</span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]), </span><span class="s1">EndOfMessage</span><span class="s2">()],</span>
+    <span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">SERVER</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">}</span>
+        <span class="s1">conn</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;DELETE&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/foo&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]),</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">SERVER</span><span class="s2">,</span>
+        <span class="s2">[</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">404</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">],</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_pipelining</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># Client doesn't support pipelining, so we have to do this by hand</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s4"># 3 requests all bunched up</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+        <span class="s6">b&quot;GET /1 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a.com</span><span class="s0">\r\n</span><span class="s6">Content-Length: 5</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;12345&quot;</span>
+        <span class="s6">b&quot;GET /2 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a.com</span><span class="s0">\r\n</span><span class="s6">Content-Length: 5</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;67890&quot;</span>
+        <span class="s6">b&quot;GET /3 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a.com</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/1&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;5&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">SEND_RESPONSE</span>
+
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">DONE</span>
+
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/2&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;5&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;67890&quot;</span><span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/3&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a.com&quot;</span><span class="s2">)]),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s4"># Doesn't pause this time, no trailing data</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+
+    <span class="s4"># Arrival of more data triggers pause</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;SADF&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">trailing_data </span><span class="s2">== (</span><span class="s6">b&quot;SADF&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+    <span class="s4"># If EOF arrives while paused, we don't see that either:</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">trailing_data </span><span class="s2">== (</span><span class="s6">b&quot;SADF&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+    <span class="s4"># Can't call receive_data with non-empty buf after closing it</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;FDSA&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_protocol_switch</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">for </span><span class="s2">(</span><span class="s1">req</span><span class="s2">, </span><span class="s1">deny</span><span class="s2">, </span><span class="s1">accept</span><span class="s2">) </span><span class="s0">in </span><span class="s2">[</span>
+        <span class="s2">(</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;CONNECT&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;example.com:443&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;foo&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">)],</span>
+            <span class="s2">),</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">404</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;foo&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Upgrade&quot;</span><span class="s2">, </span><span class="s3">&quot;a, b&quot;</span><span class="s2">)],</span>
+            <span class="s2">),</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">101</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Upgrade&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]),</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;CONNECT&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;example.com:443&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;foo&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Upgrade&quot;</span><span class="s2">, </span><span class="s3">&quot;a, b&quot;</span><span class="s2">)],</span>
+            <span class="s2">),</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">404</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s4"># Accept CONNECT, not upgrade</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+        <span class="s2">),</span>
+        <span class="s2">(</span>
+            <span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;CONNECT&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;example.com:443&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;foo&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Upgrade&quot;</span><span class="s2">, </span><span class="s3">&quot;a, b&quot;</span><span class="s2">)],</span>
+            <span class="s2">),</span>
+            <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">404</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+            <span class="s4"># Accept Upgrade, not CONNECT</span>
+            <span class="s1">InformationalResponse</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">101</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Upgrade&quot;</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">)]),</span>
+        <span class="s2">),</span>
+    <span class="s2">]:</span>
+
+        <span class="s0">def </span><span class="s1">setup</span><span class="s2">() </span><span class="s1">-&gt; ConnectionPair</span><span class="s2">:</span>
+            <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">req</span><span class="s2">)</span>
+            <span class="s4"># No switch-related state change stuff yet; the client has to</span>
+            <span class="s4"># finish the request before that kicks in</span>
+            <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+                <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">SEND_BODY</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, [</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;1&quot;</span><span class="s2">), </span><span class="s1">EndOfMessage</span><span class="s2">()])</span>
+            <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+                <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">MIGHT_SWITCH_PROTOCOL</span>
+            <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+            <span class="s0">return </span><span class="s1">p</span>
+
+        <span class="s4"># Test deny case</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">deny</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">DONE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_BODY</span><span class="s2">}</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+        <span class="s4"># Check that re-use is still allowed after a denial</span>
+        <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+            <span class="s1">conn</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+
+        <span class="s4"># Test accept case</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">accept</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SWITCHED_PROTOCOL</span><span class="s2">}</span>
+            <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;123&quot;</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+            <span class="s1">conn</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;456&quot;</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">trailing_data </span><span class="s2">== (</span><span class="s6">b&quot;123456&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+
+        <span class="s4"># Pausing in might-switch, then recovery</span>
+        <span class="s4"># (weird artificial case where the trailing data actually is valid</span>
+        <span class="s4"># HTTP for some reason, because this makes it easier to test the state</span>
+        <span class="s4"># logic)</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">sc </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">]</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">trailing_data </span><span class="s2">== (</span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">deny</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">sc</span><span class="s2">) == [</span>
+            <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">),  </span><span class="s4"># type: ignore[arg-type]</span>
+            <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s2">]</span>
+
+        <span class="s4"># When we're DONE, have no trailing data, and the connection gets</span>
+        <span class="s4"># closed, we report ConnectionClosed(). When we're in might-switch or</span>
+        <span class="s4"># switched, we don't.</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">sc </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">]</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">trailing_data </span><span class="s2">== (</span><span class="s6">b&quot;&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">accept</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">sc </span><span class="s2">= </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">]</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">PAUSED</span>
+        <span class="s1">sc</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">deny</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">sc</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">ConnectionClosed</span><span class="s2">()</span>
+
+        <span class="s4"># You can't send after switching protocols, or while waiting for a</span>
+        <span class="s4"># protocol switch</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">send</span><span class="s2">(</span>
+                <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)])</span>
+            <span class="s2">)</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">accept</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;123&quot;</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">test_close_simple</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># Just immediately closing a new connection without anything having</span>
+    <span class="s4"># happened yet.</span>
+    <span class="s0">for </span><span class="s2">(</span><span class="s1">who_shot_first</span><span class="s2">, </span><span class="s1">who_shot_second</span><span class="s2">) </span><span class="s0">in </span><span class="s2">[(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">), (</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">CLIENT</span><span class="s2">)]:</span>
+
+        <span class="s0">def </span><span class="s1">setup</span><span class="s2">() </span><span class="s1">-&gt; ConnectionPair</span><span class="s2">:</span>
+            <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">who_shot_first</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+            <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+                <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span>
+                    <span class="s1">who_shot_first</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">,</span>
+                    <span class="s1">who_shot_second</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">,</span>
+                <span class="s2">}</span>
+            <span class="s0">return </span><span class="s1">p</span>
+
+        <span class="s4"># You can keep putting b&quot;&quot; into a closed connection, and you keep</span>
+        <span class="s4"># getting ConnectionClosed() out:</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_second</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">ConnectionClosed</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_second</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">ConnectionClosed</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_second</span><span class="s2">].</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_second</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">ConnectionClosed</span><span class="s2">()</span>
+        <span class="s4"># Second party can close...</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">who_shot_second</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+        <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">CLOSED</span>
+            <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">CLOSED</span>
+        <span class="s4"># But trying to receive new data on a closed connection is a</span>
+        <span class="s4"># RuntimeError (not ProtocolError, because the problem here isn't</span>
+        <span class="s4"># violation of HTTP, it's violation of physics)</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">):</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_second</span><span class="s2">].</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;123&quot;</span><span class="s2">)</span>
+        <span class="s4"># And receiving new data on a MUST_CLOSE connection is a ProtocolError</span>
+        <span class="s1">p </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">()</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_first</span><span class="s2">].</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET&quot;</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+            <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">who_shot_first</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_close_different_states</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">req </span><span class="s2">= [</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/foo&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s1">resp </span><span class="s2">= [</span>
+        <span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s6">b&quot;chunked&quot;</span><span class="s2">)]),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+
+    <span class="s4"># Client before request</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">}</span>
+
+    <span class="s4"># Client after request</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">req</span><span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+
+    <span class="s4"># Server after request -&gt; not allowed</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">req</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">send</span><span class="s2">(</span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">()</span>
+
+    <span class="s4"># Server after response</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">req</span><span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s0">for </span><span class="s1">conn </span><span class="s0">in </span><span class="s1">p</span><span class="s2">.</span><span class="s1">conns</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">conn</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">}</span>
+
+    <span class="s4"># Both after closing (ConnectionClosed() is idempotent)</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">req</span><span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">resp</span><span class="s2">)</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+
+    <span class="s4"># In the middle of sending -&gt; not allowed</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">CLIENT</span><span class="s2">,</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;10&quot;</span><span class="s2">)]</span>
+        <span class="s2">),</span>
+    <span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">].</span><span class="s1">send</span><span class="s2">(</span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">p</span><span class="s2">.</span><span class="s1">conn</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">].</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s4"># Receive several requests and then client shuts down their side of the</span>
+<span class="s4"># connection; we can respond to each</span>
+<span class="s0">def </span><span class="s1">test_pipelined_close</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s4"># 2 requests then a close</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+        <span class="s6">b&quot;GET /1 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a.com</span><span class="s0">\r\n</span><span class="s6">Content-Length: 5</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;12345&quot;</span>
+        <span class="s6">b&quot;GET /2 HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">Host: a.com</span><span class="s0">\r\n</span><span class="s6">Content-Length: 5</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;67890&quot;</span>
+    <span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/1&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;host&quot;</span><span class="s2">, </span><span class="s3">&quot;a.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;content-length&quot;</span><span class="s2">, </span><span class="s3">&quot;5&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">] </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">states</span><span class="s2">[</span><span class="s1">SERVER</span><span class="s2">] </span><span class="s0">is </span><span class="s1">DONE</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">start_next_cycle</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s1">get_all_events</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == [</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/2&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;host&quot;</span><span class="s2">, </span><span class="s3">&quot;a.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;content-length&quot;</span><span class="s2">, </span><span class="s3">&quot;5&quot;</span><span class="s2">)],</span>
+        <span class="s2">),</span>
+        <span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;67890&quot;</span><span class="s2">),</span>
+        <span class="s1">EndOfMessage</span><span class="s2">(),</span>
+        <span class="s1">ConnectionClosed</span><span class="s2">(),</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">SEND_RESPONSE</span><span class="s2">}</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">MUST_CLOSE</span><span class="s2">}</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">ConnectionClosed</span><span class="s2">())</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">states </span><span class="s2">== {</span><span class="s1">CLIENT</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">: </span><span class="s1">CLOSED</span><span class="s2">}</span>
+
+
+<span class="s0">def </span><span class="s1">test_sendfile</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">class </span><span class="s1">SendfilePlaceholder</span><span class="s2">:</span>
+        <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s5">10</span>
+
+    <span class="s1">placeholder </span><span class="s2">= </span><span class="s1">SendfilePlaceholder</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">setup</span><span class="s2">(</span>
+        <span class="s1">header</span><span class="s2">: </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">], </span><span class="s1">http_version</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s2">) </span><span class="s1">-&gt; Tuple</span><span class="s2">[</span><span class="s1">Connection</span><span class="s2">, </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">List</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">]]]:</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+        <span class="s1">receive_and_get</span><span class="s2">(</span>
+            <span class="s1">c</span><span class="s2">, </span><span class="s3">&quot;GET / HTTP/{}</span><span class="s0">\r\n</span><span class="s3">Host: a</span><span class="s0">\r\n\r\n</span><span class="s3">&quot;</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(</span><span class="s1">http_version</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s1">headers </span><span class="s2">= []</span>
+        <span class="s0">if </span><span class="s1">header</span><span class="s2">:</span>
+            <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">header</span><span class="s2">)</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=</span><span class="s1">headers</span><span class="s2">))</span>
+        <span class="s0">return </span><span class="s1">c</span><span class="s2">, </span><span class="s1">c</span><span class="s2">.</span><span class="s1">send_with_data_passthrough</span><span class="s2">(</span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s1">placeholder</span><span class="s2">))  </span><span class="s4"># type: ignore</span>
+
+    <span class="s1">c</span><span class="s2">, </span><span class="s1">data </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">((</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;10&quot;</span><span class="s2">), </span><span class="s3">&quot;1.1&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== [</span><span class="s1">placeholder</span><span class="s2">]  </span><span class="s4"># type: ignore</span>
+    <span class="s4"># Raises an error if the connection object doesn't think we've sent</span>
+    <span class="s4"># exactly 10 bytes</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">EndOfMessage</span><span class="s2">())</span>
+
+    <span class="s1">_</span><span class="s2">, </span><span class="s1">data </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">((</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">), </span><span class="s3">&quot;1.1&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">placeholder </span><span class="s0">in </span><span class="s1">data  </span><span class="s4"># type: ignore</span>
+    <span class="s1">data</span><span class="s2">[</span><span class="s1">data</span><span class="s2">.</span><span class="s1">index</span><span class="s2">(</span><span class="s1">placeholder</span><span class="s2">)] = </span><span class="s6">b&quot;x&quot; </span><span class="s2">* </span><span class="s5">10  </span><span class="s4"># type: ignore</span>
+    <span class="s0">assert </span><span class="s6">b&quot;&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) == </span><span class="s6">b&quot;a</span><span class="s0">\r\n</span><span class="s6">xxxxxxxxxx</span><span class="s0">\r\n</span><span class="s6">&quot;  </span><span class="s4"># type: ignore</span>
+
+    <span class="s1">c</span><span class="s2">, </span><span class="s1">data </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s3">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s4"># type: ignore</span>
+    <span class="s0">assert </span><span class="s1">data </span><span class="s2">== [</span><span class="s1">placeholder</span><span class="s2">]  </span><span class="s4"># type: ignore</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">SEND_BODY</span>
+
+
+<span class="s0">def </span><span class="s1">test_errors</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># After a receive error, you can't receive</span>
+    <span class="s0">for </span><span class="s1">role </span><span class="s0">in </span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">]:</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">our_role</span><span class="s2">=</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;gibberish</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+        <span class="s4"># Now any attempt to receive continues to raise</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is </span><span class="s1">ERROR</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is not </span><span class="s1">ERROR</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s1">c</span><span class="s2">.</span><span class="s1">_cstate</span><span class="s2">.</span><span class="s1">states</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+        <span class="s4"># But we can still yell at the client for sending us gibberish</span>
+        <span class="s0">if </span><span class="s1">role </span><span class="s0">is </span><span class="s1">SERVER</span><span class="s2">:</span>
+            <span class="s0">assert </span><span class="s2">(</span>
+                <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">400</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[]))  </span><span class="s4"># type: ignore[arg-type]</span>
+                <span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 400 </span><span class="s0">\r\n</span><span class="s6">Connection: close</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+            <span class="s2">)</span>
+
+    <span class="s4"># After an error sending, you can no longer send</span>
+    <span class="s4"># (This is especially important for things like content-length errors,</span>
+    <span class="s4"># where there's complex internal state being modified)</span>
+    <span class="s0">def </span><span class="s1">conn</span><span class="s2">(</span><span class="s1">role</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">Sentinel</span><span class="s2">]) </span><span class="s1">-&gt; Connection</span><span class="s2">:</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">our_role</span><span class="s2">=</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">role </span><span class="s0">is </span><span class="s1">SERVER</span><span class="s2">:</span>
+            <span class="s4"># Put it into the state where it *could* send a response...</span>
+            <span class="s1">receive_and_get</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s6">b&quot;GET / HTTP/1.0</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">SEND_RESPONSE</span>
+        <span class="s0">return </span><span class="s1">c</span>
+
+    <span class="s0">for </span><span class="s1">role </span><span class="s0">in </span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">]:</span>
+        <span class="s0">if </span><span class="s1">role </span><span class="s0">is </span><span class="s1">CLIENT</span><span class="s2">:</span>
+            <span class="s4"># This HTTP/1.0 request won't be detected as bad until after we go</span>
+            <span class="s4"># through the state machine and hit the writing code</span>
+            <span class="s1">good </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)])</span>
+            <span class="s1">bad </span><span class="s2">= </span><span class="s1">Request</span><span class="s2">(</span>
+                <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+                <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+                <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)],</span>
+                <span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">role </span><span class="s0">is </span><span class="s1">SERVER</span><span class="s2">:</span>
+            <span class="s1">good </span><span class="s2">= </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[])  </span><span class="s4"># type: ignore[arg-type,assignment]</span>
+            <span class="s1">bad </span><span class="s2">= </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[], </span><span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">)  </span><span class="s4"># type: ignore[arg-type,assignment]</span>
+        <span class="s4"># Make sure 'good' actually is good</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">conn</span><span class="s2">(</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">good</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is not </span><span class="s1">ERROR</span>
+        <span class="s4"># Do that again, but this time sending 'bad' first</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">conn</span><span class="s2">(</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">bad</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">ERROR</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is not </span><span class="s1">ERROR</span>
+        <span class="s4"># Now 'good' is not so good</span>
+        <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">good</span><span class="s2">)</span>
+
+        <span class="s4"># And check send_failed() too</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">conn</span><span class="s2">(</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">send_failed</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">ERROR</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is not </span><span class="s1">ERROR</span>
+        <span class="s4"># This is idempotent</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">send_failed</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">our_state </span><span class="s0">is </span><span class="s1">ERROR</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">their_state </span><span class="s0">is not </span><span class="s1">ERROR</span>
+
+
+<span class="s0">def </span><span class="s1">test_idle_receive_nothing</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># At one point this incorrectly raised an error</span>
+    <span class="s0">for </span><span class="s1">role </span><span class="s0">in </span><span class="s2">[</span><span class="s1">CLIENT</span><span class="s2">, </span><span class="s1">SERVER</span><span class="s2">]:</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">role</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+
+
+<span class="s0">def </span><span class="s1">test_connection_drop</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;GET /&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">test_408_request_timeout</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># Should be able to send this spontaneously as a server without seeing</span>
+    <span class="s4"># anything from client</span>
+    <span class="s1">p </span><span class="s2">= </span><span class="s1">ConnectionPair</span><span class="s2">()</span>
+    <span class="s1">p</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">, </span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">408</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s6">b&quot;connection&quot;</span><span class="s2">, </span><span class="s6">b&quot;close&quot;</span><span class="s2">)]))</span>
+
+
+<span class="s4"># This used to raise IndexError</span>
+<span class="s0">def </span><span class="s1">test_empty_request</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s0">\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s4"># This used to raise IndexError</span>
+<span class="s0">def </span><span class="s1">test_empty_response</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">)]))</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s0">\r\n</span><span class="s6">&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;data&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s6">b&quot;</span><span class="s0">\x00</span><span class="s6">&quot;</span><span class="s2">,</span>
+        <span class="s6">b&quot;</span><span class="s0">\x20</span><span class="s6">&quot;</span><span class="s2">,</span>
+        <span class="s6">b&quot;</span><span class="s0">\x16\x03\x01\x00\xa5</span><span class="s6">&quot;</span><span class="s2">,  </span><span class="s4"># Typical start of a TLS Client Hello</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_early_detection_of_invalid_request</span><span class="s2">(</span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s4"># Early detection should occur before even receiving a `\r\n`</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s2">@</span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">mark</span><span class="s2">.</span><span class="s1">parametrize</span><span class="s2">(</span>
+    <span class="s3">&quot;data&quot;</span><span class="s2">,</span>
+    <span class="s2">[</span>
+        <span class="s6">b&quot;</span><span class="s0">\x00</span><span class="s6">&quot;</span><span class="s2">,</span>
+        <span class="s6">b&quot;</span><span class="s0">\x20</span><span class="s6">&quot;</span><span class="s2">,</span>
+        <span class="s6">b&quot;</span><span class="s0">\x16\x03\x03\x00\x31</span><span class="s6">&quot;</span><span class="s2">,  </span><span class="s4"># Typical start of a TLS Server Hello</span>
+    <span class="s2">],</span>
+<span class="s2">)</span>
+<span class="s0">def </span><span class="s1">test_early_detection_of_invalid_response</span><span class="s2">(</span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">CLIENT</span><span class="s2">)</span>
+    <span class="s4"># Early detection should occur before even receiving a `\r\n`</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">):</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+
+
+<span class="s4"># This used to give different headers for HEAD and GET.</span>
+<span class="s4"># The correct way to handle HEAD is to put whatever headers we *would* have</span>
+<span class="s4"># put if it were a GET -- even though we know that for HEAD, those headers</span>
+<span class="s4"># will be ignored.</span>
+<span class="s0">def </span><span class="s1">test_HEAD_framing_headers</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">setup</span><span class="s2">(</span><span class="s1">method</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">http_version</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; Connection</span><span class="s2">:</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+            <span class="s1">method </span><span class="s2">+ </span><span class="s6">b&quot; / HTTP/&quot; </span><span class="s2">+ </span><span class="s1">http_version </span><span class="s2">+ </span><span class="s6">b&quot;</span><span class="s0">\r\n</span><span class="s6">&quot; </span><span class="s2">+ </span><span class="s6">b&quot;Host: example.com</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()) </span><span class="s0">is </span><span class="s1">Request</span>
+        <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()) </span><span class="s0">is </span><span class="s1">EndOfMessage</span>
+        <span class="s0">return </span><span class="s1">c</span>
+
+    <span class="s0">for </span><span class="s1">method </span><span class="s0">in </span><span class="s2">[</span><span class="s6">b&quot;GET&quot;</span><span class="s2">, </span><span class="s6">b&quot;HEAD&quot;</span><span class="s2">]:</span>
+        <span class="s4"># No Content-Length, HTTP/1.1 peer, should use chunked</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">(</span><span class="s1">method</span><span class="s2">, </span><span class="s6">b&quot;1.1&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s2">(</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[])) == </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">&quot;  </span><span class="s4"># type: ignore[arg-type]</span>
+            <span class="s6">b&quot;Transfer-Encoding: chunked</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s2">)</span>
+
+        <span class="s4"># No Content-Length, HTTP/1.0 peer, frame with connection: close</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">(</span><span class="s1">method</span><span class="s2">, </span><span class="s6">b&quot;1.0&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s2">(</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">Response</span><span class="s2">(</span><span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[])) == </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">&quot;  </span><span class="s4"># type: ignore[arg-type]</span>
+            <span class="s6">b&quot;Connection: close</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s2">)</span>
+
+        <span class="s4"># Content-Length + Transfer-Encoding, TE wins</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">setup</span><span class="s2">(</span><span class="s1">method</span><span class="s2">, </span><span class="s6">b&quot;1.1&quot;</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s2">(</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+                <span class="s1">Response</span><span class="s2">(</span>
+                    <span class="s1">status_code</span><span class="s2">=</span><span class="s5">200</span><span class="s2">,</span>
+                    <span class="s1">headers</span><span class="s2">=[</span>
+                        <span class="s2">(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;100&quot;</span><span class="s2">),</span>
+                        <span class="s2">(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">),</span>
+                    <span class="s2">],</span>
+                <span class="s2">)</span>
+            <span class="s2">)</span>
+            <span class="s2">== </span><span class="s6">b&quot;HTTP/1.1 200 </span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+            <span class="s6">b&quot;Transfer-Encoding: chunked</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+        <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">test_special_exceptions_for_lost_connection_in_message_body</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+        <span class="s6">b&quot;POST / HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">&quot; b&quot;Host: example.com</span><span class="s0">\r\n</span><span class="s6">&quot; b&quot;Content-Length: 100</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()) </span><span class="s0">is </span><span class="s1">Request</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;12345&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() == </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s6">b&quot;12345&quot;</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s3">&quot;received 5 bytes&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s3">&quot;expected 100&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s1">c </span><span class="s2">= </span><span class="s1">Connection</span><span class="s2">(</span><span class="s1">SERVER</span><span class="s2">)</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span>
+        <span class="s6">b&quot;POST / HTTP/1.1</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;Host: example.com</span><span class="s0">\r\n</span><span class="s6">&quot;</span>
+        <span class="s6">b&quot;Transfer-Encoding: chunked</span><span class="s0">\r\n\r\n</span><span class="s6">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">type</span><span class="s2">(</span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()) </span><span class="s0">is </span><span class="s1">Request</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">() </span><span class="s0">is </span><span class="s1">NEED_DATA</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;8</span><span class="s0">\r\n</span><span class="s6">012345&quot;</span><span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">().</span><span class="s1">data </span><span class="s2">== </span><span class="s6">b&quot;012345&quot;  </span><span class="s4"># type: ignore</span>
+    <span class="s1">c</span><span class="s2">.</span><span class="s1">receive_data</span><span class="s2">(</span><span class="s6">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">RemoteProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">c</span><span class="s2">.</span><span class="s1">next_event</span><span class="s2">()</span>
+    <span class="s0">assert </span><span class="s3">&quot;incomplete chunked read&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

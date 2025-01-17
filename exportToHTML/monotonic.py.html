@@ -1,0 +1,193 @@
+<html>
+<head>
+<title>monotonic.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+monotonic.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s2">&quot;&quot;&quot; 
+  monotonic 
+  ~~~~~~~~~ 
+ 
+  This module provides a ``monotonic()`` function which returns the 
+  value (in fractional seconds) of a clock which never goes backwards. 
+ 
+  On Python 3.3 or newer, ``monotonic`` will be an alias of 
+  ``time.monotonic`` from the standard library. On older versions, 
+  it will fall back to an equivalent implementation: 
+ 
+  +-------------+----------------------------------------+ 
+  | Linux, BSD  | ``clock_gettime(3)``                   | 
+  +-------------+----------------------------------------+ 
+  | Windows     | ``GetTickCount`` or ``GetTickCount64`` | 
+  +-------------+----------------------------------------+ 
+  | OS X        | ``mach_absolute_time``                 | 
+  +-------------+----------------------------------------+ 
+ 
+  If no suitable implementation exists for the current platform, 
+  attempting to import this module (or to import from it) will 
+  cause a ``RuntimeError`` exception to be raised. 
+ 
+ 
+  Copyright 2014, 2015, 2016 Ori Livneh &lt;ori@wikimedia.org&gt; 
+ 
+  Licensed under the Apache License, Version 2.0 (the &quot;License&quot;); 
+  you may not use this file except in compliance with the License. 
+  You may obtain a copy of the License at 
+ 
+    http://www.apache.org/licenses/LICENSE-2.0 
+ 
+  Unless required by applicable law or agreed to in writing, software 
+  distributed under the License is distributed on an &quot;AS IS&quot; BASIS, 
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+  See the License for the specific language governing permissions and 
+  limitations under the License. 
+ 
+&quot;&quot;&quot;</span>
+<span class="s3">import </span><span class="s1">time</span>
+
+
+<span class="s1">__all__ </span><span class="s4">= (</span><span class="s5">'monotonic'</span><span class="s4">,)</span>
+
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s1">monotonic </span><span class="s4">= </span><span class="s1">time</span><span class="s4">.</span><span class="s1">monotonic</span>
+<span class="s3">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+    <span class="s3">import </span><span class="s1">ctypes</span>
+    <span class="s3">import </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">util</span>
+    <span class="s3">import </span><span class="s1">os</span>
+    <span class="s3">import </span><span class="s1">sys</span>
+    <span class="s3">import </span><span class="s1">threading</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform </span><span class="s4">== </span><span class="s5">'darwin'</span><span class="s4">:  </span><span class="s0"># OS X, iOS</span>
+            <span class="s0"># See Technical Q&amp;A QA1398 of the Mac Developer Library:</span>
+            <span class="s0">#  &lt;https://developer.apple.com/library/mac/qa/qa1398/&gt;</span>
+            <span class="s1">libc </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">CDLL</span><span class="s4">(</span><span class="s5">'/usr/lib/libc.dylib'</span><span class="s4">, </span><span class="s1">use_errno</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+
+            <span class="s3">class </span><span class="s1">mach_timebase_info_data_t</span><span class="s4">(</span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">Structure</span><span class="s4">):</span>
+                <span class="s2">&quot;&quot;&quot;System timebase info. Defined in &lt;mach/mach_time.h&gt;.&quot;&quot;&quot;</span>
+                <span class="s1">_fields_ </span><span class="s4">= ((</span><span class="s5">'numer'</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_uint32</span><span class="s4">),</span>
+                            <span class="s4">(</span><span class="s5">'denom'</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_uint32</span><span class="s4">))</span>
+
+            <span class="s1">mach_absolute_time </span><span class="s4">= </span><span class="s1">libc</span><span class="s4">.</span><span class="s1">mach_absolute_time</span>
+            <span class="s1">mach_absolute_time</span><span class="s4">.</span><span class="s1">restype </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_uint64</span>
+
+            <span class="s1">timebase </span><span class="s4">= </span><span class="s1">mach_timebase_info_data_t</span><span class="s4">()</span>
+            <span class="s1">libc</span><span class="s4">.</span><span class="s1">mach_timebase_info</span><span class="s4">(</span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">byref</span><span class="s4">(</span><span class="s1">timebase</span><span class="s4">))</span>
+            <span class="s1">nanoseconds_in_second </span><span class="s4">= </span><span class="s6">1.0e9</span>
+
+            <span class="s3">def </span><span class="s1">monotonic</span><span class="s4">():</span>
+                <span class="s2">&quot;&quot;&quot;Monotonic clock, cannot go backward.&quot;&quot;&quot;</span>
+                <span class="s1">nanoseconds </span><span class="s4">= </span><span class="s1">mach_absolute_time</span><span class="s4">() * </span><span class="s1">timebase</span><span class="s4">.</span><span class="s1">numer </span><span class="s4">/ </span><span class="s1">timebase</span><span class="s4">.</span><span class="s1">denom</span>
+                <span class="s3">return </span><span class="s1">nanoseconds </span><span class="s4">/ </span><span class="s1">nanoseconds_in_second</span>
+
+        <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'win32'</span><span class="s4">) </span><span class="s3">or </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'cygwin'</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'cygwin'</span><span class="s4">):</span>
+                <span class="s0"># Note: cygwin implements clock_gettime (CLOCK_MONOTONIC = 4) since</span>
+                <span class="s0"># version 1.7.6. Using raw WinAPI for maximum version compatibility.</span>
+
+                <span class="s0"># Ugly hack using the wrong calling convention (in 32-bit mode) </span>
+                <span class="s0"># because ctypes has no windll under cygwin (and it also seems that </span>
+                <span class="s0"># the code letting you select stdcall in _ctypes doesn't exist under </span>
+                <span class="s0"># the preprocessor definitions relevant to cygwin).</span>
+                <span class="s0"># This is 'safe' because:</span>
+                <span class="s0"># 1. The ABI of GetTickCount and GetTickCount64 is identical for </span>
+                <span class="s0">#    both calling conventions because they both have no parameters.</span>
+                <span class="s0"># 2. libffi masks the problem because after making the call it doesn't</span>
+                <span class="s0">#    touch anything through esp and epilogue code restores a correct</span>
+                <span class="s0">#    esp from ebp afterwards.</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s1">kernel32 </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">cdll</span><span class="s4">.</span><span class="s1">kernel32</span>
+                <span class="s3">except </span><span class="s1">OSError</span><span class="s4">:  </span><span class="s0"># 'No such file or directory'</span>
+                    <span class="s1">kernel32 </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">cdll</span><span class="s4">.</span><span class="s1">LoadLibrary</span><span class="s4">(</span><span class="s5">'kernel32.dll'</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">kernel32 </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">windll</span><span class="s4">.</span><span class="s1">kernel32</span>
+
+            <span class="s1">GetTickCount64 </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">kernel32</span><span class="s4">, </span><span class="s5">'GetTickCount64'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">GetTickCount64</span><span class="s4">:</span>
+                <span class="s0"># Windows Vista / Windows Server 2008 or newer.</span>
+                <span class="s1">GetTickCount64</span><span class="s4">.</span><span class="s1">restype </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_ulonglong</span>
+
+                <span class="s3">def </span><span class="s1">monotonic</span><span class="s4">():</span>
+                    <span class="s2">&quot;&quot;&quot;Monotonic clock, cannot go backward.&quot;&quot;&quot;</span>
+                    <span class="s3">return </span><span class="s1">GetTickCount64</span><span class="s4">() / </span><span class="s6">1000.0</span>
+
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># Before Windows Vista.</span>
+                <span class="s1">GetTickCount </span><span class="s4">= </span><span class="s1">kernel32</span><span class="s4">.</span><span class="s1">GetTickCount</span>
+                <span class="s1">GetTickCount</span><span class="s4">.</span><span class="s1">restype </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_uint32</span>
+
+                <span class="s1">get_tick_count_lock </span><span class="s4">= </span><span class="s1">threading</span><span class="s4">.</span><span class="s1">Lock</span><span class="s4">()</span>
+                <span class="s1">get_tick_count_last_sample </span><span class="s4">= </span><span class="s6">0</span>
+                <span class="s1">get_tick_count_wraparounds </span><span class="s4">= </span><span class="s6">0</span>
+
+                <span class="s3">def </span><span class="s1">monotonic</span><span class="s4">():</span>
+                    <span class="s2">&quot;&quot;&quot;Monotonic clock, cannot go backward.&quot;&quot;&quot;</span>
+                    <span class="s3">global </span><span class="s1">get_tick_count_last_sample</span>
+                    <span class="s3">global </span><span class="s1">get_tick_count_wraparounds</span>
+
+                    <span class="s3">with </span><span class="s1">get_tick_count_lock</span><span class="s4">:</span>
+                        <span class="s1">current_sample </span><span class="s4">= </span><span class="s1">GetTickCount</span><span class="s4">()</span>
+                        <span class="s3">if </span><span class="s1">current_sample </span><span class="s4">&lt; </span><span class="s1">get_tick_count_last_sample</span><span class="s4">:</span>
+                            <span class="s1">get_tick_count_wraparounds </span><span class="s4">+= </span><span class="s6">1</span>
+                        <span class="s1">get_tick_count_last_sample </span><span class="s4">= </span><span class="s1">current_sample</span>
+
+                        <span class="s1">final_milliseconds </span><span class="s4">= </span><span class="s1">get_tick_count_wraparounds </span><span class="s4">&lt;&lt; </span><span class="s6">32</span>
+                        <span class="s1">final_milliseconds </span><span class="s4">+= </span><span class="s1">get_tick_count_last_sample</span>
+                        <span class="s3">return </span><span class="s1">final_milliseconds </span><span class="s4">/ </span><span class="s6">1000.0</span>
+
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">clock_gettime </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">CDLL</span><span class="s4">(</span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">find_library</span><span class="s4">(</span><span class="s5">'c'</span><span class="s4">),</span>
+                                            <span class="s1">use_errno</span><span class="s4">=</span><span class="s3">True</span><span class="s4">).</span><span class="s1">clock_gettime</span>
+            <span class="s3">except </span><span class="s1">Exception</span><span class="s4">:</span>
+                <span class="s1">clock_gettime </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">CDLL</span><span class="s4">(</span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">find_library</span><span class="s4">(</span><span class="s5">'rt'</span><span class="s4">),</span>
+                                            <span class="s1">use_errno</span><span class="s4">=</span><span class="s3">True</span><span class="s4">).</span><span class="s1">clock_gettime</span>
+
+            <span class="s3">class </span><span class="s1">timespec</span><span class="s4">(</span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">Structure</span><span class="s4">):</span>
+                <span class="s2">&quot;&quot;&quot;Time specification, as described in clock_gettime(3).&quot;&quot;&quot;</span>
+                <span class="s1">_fields_ </span><span class="s4">= ((</span><span class="s5">'tv_sec'</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_long</span><span class="s4">),</span>
+                            <span class="s4">(</span><span class="s5">'tv_nsec'</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_long</span><span class="s4">))</span>
+
+            <span class="s3">if </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'linux'</span><span class="s4">):</span>
+                <span class="s1">CLOCK_MONOTONIC </span><span class="s4">= </span><span class="s6">1</span>
+            <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'freebsd'</span><span class="s4">):</span>
+                <span class="s1">CLOCK_MONOTONIC </span><span class="s4">= </span><span class="s6">4</span>
+            <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'sunos5'</span><span class="s4">):</span>
+                <span class="s1">CLOCK_MONOTONIC </span><span class="s4">= </span><span class="s6">4</span>
+            <span class="s3">elif </span><span class="s5">'bsd' </span><span class="s3">in </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">:</span>
+                <span class="s1">CLOCK_MONOTONIC </span><span class="s4">= </span><span class="s6">3</span>
+            <span class="s3">elif </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">'aix'</span><span class="s4">):</span>
+                <span class="s1">CLOCK_MONOTONIC </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">c_longlong</span><span class="s4">(</span><span class="s6">10</span><span class="s4">)</span>
+
+            <span class="s3">def </span><span class="s1">monotonic</span><span class="s4">():</span>
+                <span class="s2">&quot;&quot;&quot;Monotonic clock, cannot go backward.&quot;&quot;&quot;</span>
+                <span class="s1">ts </span><span class="s4">= </span><span class="s1">timespec</span><span class="s4">()</span>
+                <span class="s3">if </span><span class="s1">clock_gettime</span><span class="s4">(</span><span class="s1">CLOCK_MONOTONIC</span><span class="s4">, </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">pointer</span><span class="s4">(</span><span class="s1">ts</span><span class="s4">)):</span>
+                    <span class="s1">errno </span><span class="s4">= </span><span class="s1">ctypes</span><span class="s4">.</span><span class="s1">get_errno</span><span class="s4">()</span>
+                    <span class="s3">raise </span><span class="s1">OSError</span><span class="s4">(</span><span class="s1">errno</span><span class="s4">, </span><span class="s1">os</span><span class="s4">.</span><span class="s1">strerror</span><span class="s4">(</span><span class="s1">errno</span><span class="s4">))</span>
+                <span class="s3">return </span><span class="s1">ts</span><span class="s4">.</span><span class="s1">tv_sec </span><span class="s4">+ </span><span class="s1">ts</span><span class="s4">.</span><span class="s1">tv_nsec </span><span class="s4">/ </span><span class="s6">1.0e9</span>
+
+        <span class="s0"># Perform a sanity-check.</span>
+        <span class="s3">if </span><span class="s1">monotonic</span><span class="s4">() - </span><span class="s1">monotonic</span><span class="s4">() &gt; </span><span class="s6">0</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'monotonic() is not monotonic!'</span><span class="s4">)</span>
+
+    <span class="s3">except </span><span class="s1">Exception </span><span class="s3">as </span><span class="s1">e</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">RuntimeError</span><span class="s4">(</span><span class="s5">'no suitable implementation for this system: ' </span><span class="s4">+ </span><span class="s1">repr</span><span class="s4">(</span><span class="s1">e</span><span class="s4">))</span>
+</pre>
+</body>
+</html>

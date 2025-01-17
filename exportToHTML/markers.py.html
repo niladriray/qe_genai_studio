@@ -1,0 +1,185 @@
+<html>
+<head>
+<title>markers.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+markers.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (C) 2012-2023 Vinay Sajip.</span>
+<span class="s0"># Licensed to the Python Software Foundation under a contributor agreement.</span>
+<span class="s0"># See LICENSE.txt and CONTRIBUTORS.txt.</span>
+<span class="s0">#</span>
+<span class="s2">&quot;&quot;&quot; 
+Parser for the environment markers micro-language defined in PEP 508. 
+&quot;&quot;&quot;</span>
+
+<span class="s0"># Note: In PEP 345, the micro-language was Python compatible, so the ast</span>
+<span class="s0"># module could be used to parse it. However, PEP 508 introduced operators such</span>
+<span class="s0"># as ~= and === which aren't in Python, necessitating a different approach.</span>
+
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">re</span>
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">import </span><span class="s1">platform</span>
+
+<span class="s3">from </span><span class="s4">.</span><span class="s1">compat </span><span class="s3">import </span><span class="s1">string_types</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">in_venv</span><span class="s4">, </span><span class="s1">parse_marker</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">version </span><span class="s3">import </span><span class="s1">LegacyVersion </span><span class="s3">as </span><span class="s1">LV</span>
+
+<span class="s1">__all__ </span><span class="s4">= [</span><span class="s5">'interpret'</span><span class="s4">]</span>
+
+<span class="s1">_VERSION_PATTERN </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'((\d+(\.\d+)*\w*)|\'(\d+(\.\d+)*\w*)\'|\&quot;(\d+(\.\d+)*\w*)\&quot;)'</span><span class="s4">)</span>
+<span class="s1">_VERSION_MARKERS </span><span class="s4">= {</span><span class="s5">'python_version'</span><span class="s4">, </span><span class="s5">'python_full_version'</span><span class="s4">}</span>
+
+
+<span class="s3">def </span><span class="s1">_is_version_marker</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">s</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">) </span><span class="s3">and </span><span class="s1">s </span><span class="s3">in </span><span class="s1">_VERSION_MARKERS</span>
+
+
+<span class="s3">def </span><span class="s1">_is_literal</span><span class="s4">(</span><span class="s1">o</span><span class="s4">):</span>
+    <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">o</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">) </span><span class="s3">or not </span><span class="s1">o</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+    <span class="s3">return </span><span class="s1">o</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] </span><span class="s3">in </span><span class="s5">'</span><span class="s3">\'</span><span class="s5">&quot;'</span>
+
+
+<span class="s3">def </span><span class="s1">_get_versions</span><span class="s4">(</span><span class="s1">s</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s4">{</span><span class="s1">LV</span><span class="s4">(</span><span class="s1">m</span><span class="s4">.</span><span class="s1">groups</span><span class="s4">()[</span><span class="s6">0</span><span class="s4">]) </span><span class="s3">for </span><span class="s1">m </span><span class="s3">in </span><span class="s1">_VERSION_PATTERN</span><span class="s4">.</span><span class="s1">finditer</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)}</span>
+
+
+<span class="s3">class </span><span class="s1">Evaluator</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    This class is used to evaluate marker expressions. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">operations </span><span class="s4">= {</span>
+        <span class="s5">'=='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'==='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'~='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y </span><span class="s3">or </span><span class="s1">x </span><span class="s4">&gt; </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'!='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">!= </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'&lt;'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">&lt; </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'&lt;='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y </span><span class="s3">or </span><span class="s1">x </span><span class="s4">&lt; </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'&gt;'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">&gt; </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'&gt;='</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">== </span><span class="s1">y </span><span class="s3">or </span><span class="s1">x </span><span class="s4">&gt; </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'and'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s3">and </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'or'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s3">or </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'in'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s3">in </span><span class="s1">y</span><span class="s4">,</span>
+        <span class="s5">'not in'</span><span class="s4">: </span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s3">not in </span><span class="s1">y</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s3">def </span><span class="s1">evaluate</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">expr</span><span class="s4">, </span><span class="s1">context</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Evaluate a marker expression returned by the :func:`parse_requirement` 
+        function in the specified context. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">expr</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">expr</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] </span><span class="s3">in </span><span class="s5">'</span><span class="s3">\'</span><span class="s5">&quot;'</span><span class="s4">:</span>
+                <span class="s1">result </span><span class="s4">= </span><span class="s1">expr</span><span class="s4">[</span><span class="s6">1</span><span class="s4">:-</span><span class="s6">1</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">expr </span><span class="s3">not in </span><span class="s1">context</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">SyntaxError</span><span class="s4">(</span><span class="s5">'unknown variable: %s' </span><span class="s4">% </span><span class="s1">expr</span><span class="s4">)</span>
+                <span class="s1">result </span><span class="s4">= </span><span class="s1">context</span><span class="s4">[</span><span class="s1">expr</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">expr</span><span class="s4">, </span><span class="s1">dict</span><span class="s4">)</span>
+            <span class="s1">op </span><span class="s4">= </span><span class="s1">expr</span><span class="s4">[</span><span class="s5">'op'</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">op </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operations</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span><span class="s5">'op not implemented: %s' </span><span class="s4">% </span><span class="s1">op</span><span class="s4">)</span>
+            <span class="s1">elhs </span><span class="s4">= </span><span class="s1">expr</span><span class="s4">[</span><span class="s5">'lhs'</span><span class="s4">]</span>
+            <span class="s1">erhs </span><span class="s4">= </span><span class="s1">expr</span><span class="s4">[</span><span class="s5">'rhs'</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">_is_literal</span><span class="s4">(</span><span class="s1">expr</span><span class="s4">[</span><span class="s5">'lhs'</span><span class="s4">]) </span><span class="s3">and </span><span class="s1">_is_literal</span><span class="s4">(</span><span class="s1">expr</span><span class="s4">[</span><span class="s5">'rhs'</span><span class="s4">]):</span>
+                <span class="s3">raise </span><span class="s1">SyntaxError</span><span class="s4">(</span><span class="s5">'invalid comparison: %s %s %s' </span><span class="s4">% (</span><span class="s1">elhs</span><span class="s4">, </span><span class="s1">op</span><span class="s4">, </span><span class="s1">erhs</span><span class="s4">))</span>
+
+            <span class="s1">lhs </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">evaluate</span><span class="s4">(</span><span class="s1">elhs</span><span class="s4">, </span><span class="s1">context</span><span class="s4">)</span>
+            <span class="s1">rhs </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">evaluate</span><span class="s4">(</span><span class="s1">erhs</span><span class="s4">, </span><span class="s1">context</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s4">((</span><span class="s1">_is_version_marker</span><span class="s4">(</span><span class="s1">elhs</span><span class="s4">) </span><span class="s3">or </span><span class="s1">_is_version_marker</span><span class="s4">(</span><span class="s1">erhs</span><span class="s4">)) </span><span class="s3">and</span>
+                    <span class="s1">op </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'&lt;'</span><span class="s4">, </span><span class="s5">'&lt;='</span><span class="s4">, </span><span class="s5">'&gt;'</span><span class="s4">, </span><span class="s5">'&gt;='</span><span class="s4">, </span><span class="s5">'==='</span><span class="s4">, </span><span class="s5">'=='</span><span class="s4">, </span><span class="s5">'!='</span><span class="s4">, </span><span class="s5">'~='</span><span class="s4">)):</span>
+                <span class="s1">lhs </span><span class="s4">= </span><span class="s1">LV</span><span class="s4">(</span><span class="s1">lhs</span><span class="s4">)</span>
+                <span class="s1">rhs </span><span class="s4">= </span><span class="s1">LV</span><span class="s4">(</span><span class="s1">rhs</span><span class="s4">)</span>
+            <span class="s3">elif </span><span class="s1">_is_version_marker</span><span class="s4">(</span><span class="s1">elhs</span><span class="s4">) </span><span class="s3">and </span><span class="s1">op </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'in'</span><span class="s4">, </span><span class="s5">'not in'</span><span class="s4">):</span>
+                <span class="s1">lhs </span><span class="s4">= </span><span class="s1">LV</span><span class="s4">(</span><span class="s1">lhs</span><span class="s4">)</span>
+                <span class="s1">rhs </span><span class="s4">= </span><span class="s1">_get_versions</span><span class="s4">(</span><span class="s1">rhs</span><span class="s4">)</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">operations</span><span class="s4">[</span><span class="s1">op</span><span class="s4">](</span><span class="s1">lhs</span><span class="s4">, </span><span class="s1">rhs</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s1">_DIGITS </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'\d+\.\d+'</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">default_context</span><span class="s4">():</span>
+
+    <span class="s3">def </span><span class="s1">format_full_version</span><span class="s4">(</span><span class="s1">info</span><span class="s4">):</span>
+        <span class="s1">version </span><span class="s4">= </span><span class="s5">'%s.%s.%s' </span><span class="s4">% (</span><span class="s1">info</span><span class="s4">.</span><span class="s1">major</span><span class="s4">, </span><span class="s1">info</span><span class="s4">.</span><span class="s1">minor</span><span class="s4">, </span><span class="s1">info</span><span class="s4">.</span><span class="s1">micro</span><span class="s4">)</span>
+        <span class="s1">kind </span><span class="s4">= </span><span class="s1">info</span><span class="s4">.</span><span class="s1">releaselevel</span>
+        <span class="s3">if </span><span class="s1">kind </span><span class="s4">!= </span><span class="s5">'final'</span><span class="s4">:</span>
+            <span class="s1">version </span><span class="s4">+= </span><span class="s1">kind</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] + </span><span class="s1">str</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">serial</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">version</span>
+
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">, </span><span class="s5">'implementation'</span><span class="s4">):</span>
+        <span class="s1">implementation_version </span><span class="s4">= </span><span class="s1">format_full_version</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">.</span><span class="s1">implementation</span><span class="s4">.</span><span class="s1">version</span><span class="s4">)</span>
+        <span class="s1">implementation_name </span><span class="s4">= </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">implementation</span><span class="s4">.</span><span class="s1">name</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">implementation_version </span><span class="s4">= </span><span class="s5">'0'</span>
+        <span class="s1">implementation_name </span><span class="s4">= </span><span class="s5">''</span>
+
+    <span class="s1">ppv </span><span class="s4">= </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">python_version</span><span class="s4">()</span>
+    <span class="s1">m </span><span class="s4">= </span><span class="s1">_DIGITS</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">ppv</span><span class="s4">)</span>
+    <span class="s1">pv </span><span class="s4">= </span><span class="s1">m</span><span class="s4">.</span><span class="s1">group</span><span class="s4">(</span><span class="s6">0</span><span class="s4">)</span>
+    <span class="s1">result </span><span class="s4">= {</span>
+        <span class="s5">'implementation_name'</span><span class="s4">: </span><span class="s1">implementation_name</span><span class="s4">,</span>
+        <span class="s5">'implementation_version'</span><span class="s4">: </span><span class="s1">implementation_version</span><span class="s4">,</span>
+        <span class="s5">'os_name'</span><span class="s4">: </span><span class="s1">os</span><span class="s4">.</span><span class="s1">name</span><span class="s4">,</span>
+        <span class="s5">'platform_machine'</span><span class="s4">: </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">machine</span><span class="s4">(),</span>
+        <span class="s5">'platform_python_implementation'</span><span class="s4">: </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">python_implementation</span><span class="s4">(),</span>
+        <span class="s5">'platform_release'</span><span class="s4">: </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">release</span><span class="s4">(),</span>
+        <span class="s5">'platform_system'</span><span class="s4">: </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">system</span><span class="s4">(),</span>
+        <span class="s5">'platform_version'</span><span class="s4">: </span><span class="s1">platform</span><span class="s4">.</span><span class="s1">version</span><span class="s4">(),</span>
+        <span class="s5">'platform_in_venv'</span><span class="s4">: </span><span class="s1">str</span><span class="s4">(</span><span class="s1">in_venv</span><span class="s4">()),</span>
+        <span class="s5">'python_full_version'</span><span class="s4">: </span><span class="s1">ppv</span><span class="s4">,</span>
+        <span class="s5">'python_version'</span><span class="s4">: </span><span class="s1">pv</span><span class="s4">,</span>
+        <span class="s5">'sys_platform'</span><span class="s4">: </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">platform</span><span class="s4">,</span>
+    <span class="s4">}</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s1">DEFAULT_CONTEXT </span><span class="s4">= </span><span class="s1">default_context</span><span class="s4">()</span>
+<span class="s3">del </span><span class="s1">default_context</span>
+
+<span class="s1">evaluator </span><span class="s4">= </span><span class="s1">Evaluator</span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">interpret</span><span class="s4">(</span><span class="s1">marker</span><span class="s4">, </span><span class="s1">execution_context</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Interpret a marker and return a result depending on environment. 
+ 
+    :param marker: The marker to interpret. 
+    :type marker: str 
+    :param execution_context: The context used for name lookup. 
+    :type execution_context: mapping 
+    &quot;&quot;&quot;</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s1">expr</span><span class="s4">, </span><span class="s1">rest </span><span class="s4">= </span><span class="s1">parse_marker</span><span class="s4">(</span><span class="s1">marker</span><span class="s4">)</span>
+    <span class="s3">except </span><span class="s1">Exception </span><span class="s3">as </span><span class="s1">e</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">SyntaxError</span><span class="s4">(</span><span class="s5">'Unable to interpret marker syntax: %s: %s' </span><span class="s4">% (</span><span class="s1">marker</span><span class="s4">, </span><span class="s1">e</span><span class="s4">))</span>
+    <span class="s3">if </span><span class="s1">rest </span><span class="s3">and </span><span class="s1">rest</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] != </span><span class="s5">'#'</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">SyntaxError</span><span class="s4">(</span><span class="s5">'unexpected trailing data in marker: %s: %s' </span><span class="s4">% (</span><span class="s1">marker</span><span class="s4">, </span><span class="s1">rest</span><span class="s4">))</span>
+    <span class="s1">context </span><span class="s4">= </span><span class="s1">dict</span><span class="s4">(</span><span class="s1">DEFAULT_CONTEXT</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">execution_context</span><span class="s4">:</span>
+        <span class="s1">context</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">execution_context</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">evaluator</span><span class="s4">.</span><span class="s1">evaluate</span><span class="s4">(</span><span class="s1">expr</span><span class="s4">, </span><span class="s1">context</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

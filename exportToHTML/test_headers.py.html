@@ -1,0 +1,180 @@
+<html>
+<head>
+<title>test_headers.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #a5c261;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_headers.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">pytest</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_events </span><span class="s0">import </span><span class="s1">Request</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_headers </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">get_comma_header</span><span class="s2">,</span>
+    <span class="s1">has_expect_100_continue</span><span class="s2">,</span>
+    <span class="s1">Headers</span><span class="s2">,</span>
+    <span class="s1">normalize_and_validate</span><span class="s2">,</span>
+    <span class="s1">set_comma_header</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">LocalProtocolError</span>
+
+
+<span class="s0">def </span><span class="s1">test_normalize_and_validate</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;bar&quot;</span><span class="s2">)]) == [(</span><span class="s4">b&quot;foo&quot;</span><span class="s2">, </span><span class="s4">b&quot;bar&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo&quot;</span><span class="s2">, </span><span class="s4">b&quot;bar&quot;</span><span class="s2">)]) == [(</span><span class="s4">b&quot;foo&quot;</span><span class="s2">, </span><span class="s4">b&quot;bar&quot;</span><span class="s2">)]</span>
+
+    <span class="s5"># no leading/trailing whitespace in names</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo &quot;</span><span class="s2">, </span><span class="s3">&quot;bar&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot; foo&quot;</span><span class="s2">, </span><span class="s3">&quot;bar&quot;</span><span class="s2">)])</span>
+
+    <span class="s5"># no weird characters in names</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo bar&quot;</span><span class="s2">, </span><span class="s4">b&quot;baz&quot;</span><span class="s2">)])</span>
+    <span class="s0">assert </span><span class="s3">&quot;foo bar&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo</span><span class="s0">\x00</span><span class="s4">bar&quot;</span><span class="s2">, </span><span class="s4">b&quot;baz&quot;</span><span class="s2">)])</span>
+    <span class="s5"># Not even 8-bit characters:</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo</span><span class="s0">\xff</span><span class="s4">bar&quot;</span><span class="s2">, </span><span class="s4">b&quot;baz&quot;</span><span class="s2">)])</span>
+    <span class="s5"># And not even the control characters we allow in values:</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s4">b&quot;foo</span><span class="s0">\x01</span><span class="s4">bar&quot;</span><span class="s2">, </span><span class="s4">b&quot;baz&quot;</span><span class="s2">)])</span>
+
+    <span class="s5"># no return or NUL characters in values</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;bar</span><span class="s0">\r</span><span class="s3">baz&quot;</span><span class="s2">)])</span>
+    <span class="s0">assert </span><span class="s3">&quot;bar</span><span class="s0">\\</span><span class="s3">rbaz&quot; </span><span class="s0">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;bar</span><span class="s0">\n</span><span class="s3">baz&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;bar</span><span class="s0">\x00</span><span class="s3">baz&quot;</span><span class="s2">)])</span>
+    <span class="s5"># no leading/trailing whitespace</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;barbaz  &quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;  barbaz&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;barbaz</span><span class="s0">\t</span><span class="s3">&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;foo&quot;</span><span class="s2">, </span><span class="s3">&quot;</span><span class="s0">\t</span><span class="s3">barbaz&quot;</span><span class="s2">)])</span>
+
+    <span class="s5"># content-length</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">)]) == [</span>
+        <span class="s2">(</span><span class="s4">b&quot;content-length&quot;</span><span class="s2">, </span><span class="s4">b&quot;1&quot;</span><span class="s2">)</span>
+    <span class="s2">]</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;asdf&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1x&quot;</span><span class="s2">)])</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;2&quot;</span><span class="s2">)])</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">(</span>
+        <span class="s2">[(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;0&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;0&quot;</span><span class="s2">)]</span>
+    <span class="s2">) == [(</span><span class="s4">b&quot;content-length&quot;</span><span class="s2">, </span><span class="s4">b&quot;0&quot;</span><span class="s2">)]</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;0 , 0&quot;</span><span class="s2">)]) == [</span>
+        <span class="s2">(</span><span class="s4">b&quot;content-length&quot;</span><span class="s2">, </span><span class="s4">b&quot;0&quot;</span><span class="s2">)</span>
+    <span class="s2">]</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">(</span>
+            <span class="s2">[(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1&quot;</span><span class="s2">), (</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;2&quot;</span><span class="s2">)]</span>
+        <span class="s2">)</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Content-Length&quot;</span><span class="s2">, </span><span class="s3">&quot;1 , 1,2&quot;</span><span class="s2">)])</span>
+
+    <span class="s5"># transfer-encoding</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">)]) == [</span>
+        <span class="s2">(</span><span class="s4">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s4">b&quot;chunked&quot;</span><span class="s2">)</span>
+    <span class="s2">]</span>
+    <span class="s0">assert </span><span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;cHuNkEd&quot;</span><span class="s2">)]) == [</span>
+        <span class="s2">(</span><span class="s4">b&quot;transfer-encoding&quot;</span><span class="s2">, </span><span class="s4">b&quot;chunked&quot;</span><span class="s2">)</span>
+    <span class="s2">]</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">([(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;gzip&quot;</span><span class="s2">)])</span>
+    <span class="s0">assert </span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">.</span><span class="s1">error_status_hint </span><span class="s2">== </span><span class="s6">501  </span><span class="s5"># Not Implemented</span>
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">excinfo</span><span class="s2">:</span>
+        <span class="s1">normalize_and_validate</span><span class="s2">(</span>
+            <span class="s2">[(</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;chunked&quot;</span><span class="s2">), (</span><span class="s3">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s3">&quot;gzip&quot;</span><span class="s2">)]</span>
+        <span class="s2">)</span>
+    <span class="s0">assert </span><span class="s1">excinfo</span><span class="s2">.</span><span class="s1">value</span><span class="s2">.</span><span class="s1">error_status_hint </span><span class="s2">== </span><span class="s6">501  </span><span class="s5"># Not Implemented</span>
+
+
+<span class="s0">def </span><span class="s1">test_get_set_comma_header</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">headers </span><span class="s2">= </span><span class="s1">normalize_and_validate</span><span class="s2">(</span>
+        <span class="s2">[</span>
+            <span class="s2">(</span><span class="s3">&quot;Connection&quot;</span><span class="s2">, </span><span class="s3">&quot;close&quot;</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s3">&quot;whatever&quot;</span><span class="s2">, </span><span class="s3">&quot;something&quot;</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s3">&quot;connectiON&quot;</span><span class="s2">, </span><span class="s3">&quot;fOo,, , BAR&quot;</span><span class="s2">),</span>
+        <span class="s2">]</span>
+    <span class="s2">)</span>
+
+    <span class="s0">assert </span><span class="s1">get_comma_header</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s4">b&quot;connection&quot;</span><span class="s2">) == [</span><span class="s4">b&quot;close&quot;</span><span class="s2">, </span><span class="s4">b&quot;foo&quot;</span><span class="s2">, </span><span class="s4">b&quot;bar&quot;</span><span class="s2">]</span>
+
+    <span class="s1">headers </span><span class="s2">= </span><span class="s1">set_comma_header</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, [</span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">])  </span><span class="s5"># type: ignore</span>
+
+    <span class="s0">with </span><span class="s1">pytest</span><span class="s2">.</span><span class="s1">raises</span><span class="s2">(</span><span class="s1">LocalProtocolError</span><span class="s2">):</span>
+        <span class="s1">set_comma_header</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, [</span><span class="s3">&quot;  a&quot;</span><span class="s2">, </span><span class="s3">&quot;b&quot;</span><span class="s2">])  </span><span class="s5"># type: ignore</span>
+
+    <span class="s0">assert </span><span class="s1">headers </span><span class="s2">== [</span>
+        <span class="s2">(</span><span class="s4">b&quot;connection&quot;</span><span class="s2">, </span><span class="s4">b&quot;close&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;whatever&quot;</span><span class="s2">, </span><span class="s4">b&quot;something&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;connection&quot;</span><span class="s2">, </span><span class="s4">b&quot;fOo,, , BAR&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, </span><span class="s4">b&quot;a&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, </span><span class="s4">b&quot;b&quot;</span><span class="s2">),</span>
+    <span class="s2">]</span>
+
+    <span class="s1">headers </span><span class="s2">= </span><span class="s1">set_comma_header</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">, </span><span class="s4">b&quot;whatever&quot;</span><span class="s2">, [</span><span class="s3">&quot;different thing&quot;</span><span class="s2">])  </span><span class="s5"># type: ignore</span>
+
+    <span class="s0">assert </span><span class="s1">headers </span><span class="s2">== [</span>
+        <span class="s2">(</span><span class="s4">b&quot;connection&quot;</span><span class="s2">, </span><span class="s4">b&quot;close&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;connection&quot;</span><span class="s2">, </span><span class="s4">b&quot;fOo,, , BAR&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, </span><span class="s4">b&quot;a&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;newthing&quot;</span><span class="s2">, </span><span class="s4">b&quot;b&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s4">b&quot;whatever&quot;</span><span class="s2">, </span><span class="s4">b&quot;different thing&quot;</span><span class="s2">),</span>
+    <span class="s2">]</span>
+
+
+<span class="s0">def </span><span class="s1">test_has_100_continue</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">assert </span><span class="s1">has_expect_100_continue</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Expect&quot;</span><span class="s2">, </span><span class="s3">&quot;100-continue&quot;</span><span class="s2">)],</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s0">assert not </span><span class="s1">has_expect_100_continue</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span><span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">, </span><span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">)])</span>
+    <span class="s2">)</span>
+    <span class="s5"># Case insensitive</span>
+    <span class="s0">assert </span><span class="s1">has_expect_100_continue</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Expect&quot;</span><span class="s2">, </span><span class="s3">&quot;100-Continue&quot;</span><span class="s2">)],</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+    <span class="s5"># Doesn't work in HTTP/1.0</span>
+    <span class="s0">assert not </span><span class="s1">has_expect_100_continue</span><span class="s2">(</span>
+        <span class="s1">Request</span><span class="s2">(</span>
+            <span class="s1">method</span><span class="s2">=</span><span class="s3">&quot;GET&quot;</span><span class="s2">,</span>
+            <span class="s1">target</span><span class="s2">=</span><span class="s3">&quot;/&quot;</span><span class="s2">,</span>
+            <span class="s1">headers</span><span class="s2">=[(</span><span class="s3">&quot;Host&quot;</span><span class="s2">, </span><span class="s3">&quot;example.com&quot;</span><span class="s2">), (</span><span class="s3">&quot;Expect&quot;</span><span class="s2">, </span><span class="s3">&quot;100-continue&quot;</span><span class="s2">)],</span>
+            <span class="s1">http_version</span><span class="s2">=</span><span class="s3">&quot;1.0&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+    <span class="s2">)</span>
+</pre>
+</body>
+</html>

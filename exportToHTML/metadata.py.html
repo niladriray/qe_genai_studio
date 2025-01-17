@@ -1,0 +1,1054 @@
+<html>
+<head>
+<title>metadata.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+metadata.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (C) 2012 The Python Software Foundation.</span>
+<span class="s0"># See LICENSE.txt and CONTRIBUTORS.txt.</span>
+<span class="s0">#</span>
+<span class="s2">&quot;&quot;&quot;Implementation of the Metadata for Python packages PEPs. 
+ 
+Supports all metadata formats (1.0, 1.1, 1.2, 1.3/2.1 and 2.2). 
+&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">unicode_literals</span>
+
+<span class="s3">import </span><span class="s1">codecs</span>
+<span class="s3">from </span><span class="s1">email </span><span class="s3">import </span><span class="s1">message_from_file</span>
+<span class="s3">import </span><span class="s1">json</span>
+<span class="s3">import </span><span class="s1">logging</span>
+<span class="s3">import </span><span class="s1">re</span>
+
+<span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">DistlibException</span><span class="s4">, </span><span class="s1">__version__</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">compat </span><span class="s3">import </span><span class="s1">StringIO</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">, </span><span class="s1">text_type</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">markers </span><span class="s3">import </span><span class="s1">interpret</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">extract_by_key</span><span class="s4">, </span><span class="s1">get_extras</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">version </span><span class="s3">import </span><span class="s1">get_scheme</span><span class="s4">, </span><span class="s1">PEP440_VERSION_RE</span>
+
+<span class="s1">logger </span><span class="s4">= </span><span class="s1">logging</span><span class="s4">.</span><span class="s1">getLogger</span><span class="s4">(</span><span class="s1">__name__</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">MetadataMissingError</span><span class="s4">(</span><span class="s1">DistlibException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;A required metadata is missing&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">MetadataConflictError</span><span class="s4">(</span><span class="s1">DistlibException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Attempt to read or write metadata fields that are conflictual.&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">MetadataUnrecognizedVersionError</span><span class="s4">(</span><span class="s1">DistlibException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Unknown metadata version number.&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">MetadataInvalidError</span><span class="s4">(</span><span class="s1">DistlibException</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;A metadata value is invalid&quot;&quot;&quot;</span>
+
+
+<span class="s0"># public API of this module</span>
+<span class="s1">__all__ </span><span class="s4">= [</span><span class="s5">'Metadata'</span><span class="s4">, </span><span class="s5">'PKG_INFO_ENCODING'</span><span class="s4">, </span><span class="s5">'PKG_INFO_PREFERRED_VERSION'</span><span class="s4">]</span>
+
+<span class="s0"># Encoding used for the PKG-INFO files</span>
+<span class="s1">PKG_INFO_ENCODING </span><span class="s4">= </span><span class="s5">'utf-8'</span>
+
+<span class="s0"># preferred version. Hopefully will be changed</span>
+<span class="s0"># to 1.2 once PEP 345 is supported everywhere</span>
+<span class="s1">PKG_INFO_PREFERRED_VERSION </span><span class="s4">= </span><span class="s5">'1.1'</span>
+
+<span class="s1">_LINE_PREFIX_1_2 </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n       \\</span><span class="s5">|'</span><span class="s4">)</span>
+<span class="s1">_LINE_PREFIX_PRE_1_2 </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n        </span><span class="s5">'</span><span class="s4">)</span>
+<span class="s1">_241_FIELDS </span><span class="s4">= (</span><span class="s5">'Metadata-Version'</span><span class="s4">, </span><span class="s5">'Name'</span><span class="s4">, </span><span class="s5">'Version'</span><span class="s4">, </span><span class="s5">'Platform'</span><span class="s4">, </span><span class="s5">'Summary'</span><span class="s4">, </span><span class="s5">'Description'</span><span class="s4">, </span><span class="s5">'Keywords'</span><span class="s4">, </span><span class="s5">'Home-page'</span><span class="s4">,</span>
+               <span class="s5">'Author'</span><span class="s4">, </span><span class="s5">'Author-email'</span><span class="s4">, </span><span class="s5">'License'</span><span class="s4">)</span>
+
+<span class="s1">_314_FIELDS </span><span class="s4">= (</span><span class="s5">'Metadata-Version'</span><span class="s4">, </span><span class="s5">'Name'</span><span class="s4">, </span><span class="s5">'Version'</span><span class="s4">, </span><span class="s5">'Platform'</span><span class="s4">, </span><span class="s5">'Supported-Platform'</span><span class="s4">, </span><span class="s5">'Summary'</span><span class="s4">, </span><span class="s5">'Description'</span><span class="s4">,</span>
+               <span class="s5">'Keywords'</span><span class="s4">, </span><span class="s5">'Home-page'</span><span class="s4">, </span><span class="s5">'Author'</span><span class="s4">, </span><span class="s5">'Author-email'</span><span class="s4">, </span><span class="s5">'License'</span><span class="s4">, </span><span class="s5">'Classifier'</span><span class="s4">, </span><span class="s5">'Download-URL'</span><span class="s4">, </span><span class="s5">'Obsoletes'</span><span class="s4">,</span>
+               <span class="s5">'Provides'</span><span class="s4">, </span><span class="s5">'Requires'</span><span class="s4">)</span>
+
+<span class="s1">_314_MARKERS </span><span class="s4">= (</span><span class="s5">'Obsoletes'</span><span class="s4">, </span><span class="s5">'Provides'</span><span class="s4">, </span><span class="s5">'Requires'</span><span class="s4">, </span><span class="s5">'Classifier'</span><span class="s4">, </span><span class="s5">'Download-URL'</span><span class="s4">)</span>
+
+<span class="s1">_345_FIELDS </span><span class="s4">= (</span><span class="s5">'Metadata-Version'</span><span class="s4">, </span><span class="s5">'Name'</span><span class="s4">, </span><span class="s5">'Version'</span><span class="s4">, </span><span class="s5">'Platform'</span><span class="s4">, </span><span class="s5">'Supported-Platform'</span><span class="s4">, </span><span class="s5">'Summary'</span><span class="s4">, </span><span class="s5">'Description'</span><span class="s4">,</span>
+               <span class="s5">'Keywords'</span><span class="s4">, </span><span class="s5">'Home-page'</span><span class="s4">, </span><span class="s5">'Author'</span><span class="s4">, </span><span class="s5">'Author-email'</span><span class="s4">, </span><span class="s5">'Maintainer'</span><span class="s4">, </span><span class="s5">'Maintainer-email'</span><span class="s4">, </span><span class="s5">'License'</span><span class="s4">,</span>
+               <span class="s5">'Classifier'</span><span class="s4">, </span><span class="s5">'Download-URL'</span><span class="s4">, </span><span class="s5">'Obsoletes-Dist'</span><span class="s4">, </span><span class="s5">'Project-URL'</span><span class="s4">, </span><span class="s5">'Provides-Dist'</span><span class="s4">, </span><span class="s5">'Requires-Dist'</span><span class="s4">,</span>
+               <span class="s5">'Requires-Python'</span><span class="s4">, </span><span class="s5">'Requires-External'</span><span class="s4">)</span>
+
+<span class="s1">_345_MARKERS </span><span class="s4">= (</span><span class="s5">'Provides-Dist'</span><span class="s4">, </span><span class="s5">'Requires-Dist'</span><span class="s4">, </span><span class="s5">'Requires-Python'</span><span class="s4">, </span><span class="s5">'Obsoletes-Dist'</span><span class="s4">, </span><span class="s5">'Requires-External'</span><span class="s4">,</span>
+                <span class="s5">'Maintainer'</span><span class="s4">, </span><span class="s5">'Maintainer-email'</span><span class="s4">, </span><span class="s5">'Project-URL'</span><span class="s4">)</span>
+
+<span class="s1">_426_FIELDS </span><span class="s4">= (</span><span class="s5">'Metadata-Version'</span><span class="s4">, </span><span class="s5">'Name'</span><span class="s4">, </span><span class="s5">'Version'</span><span class="s4">, </span><span class="s5">'Platform'</span><span class="s4">, </span><span class="s5">'Supported-Platform'</span><span class="s4">, </span><span class="s5">'Summary'</span><span class="s4">, </span><span class="s5">'Description'</span><span class="s4">,</span>
+               <span class="s5">'Keywords'</span><span class="s4">, </span><span class="s5">'Home-page'</span><span class="s4">, </span><span class="s5">'Author'</span><span class="s4">, </span><span class="s5">'Author-email'</span><span class="s4">, </span><span class="s5">'Maintainer'</span><span class="s4">, </span><span class="s5">'Maintainer-email'</span><span class="s4">, </span><span class="s5">'License'</span><span class="s4">,</span>
+               <span class="s5">'Classifier'</span><span class="s4">, </span><span class="s5">'Download-URL'</span><span class="s4">, </span><span class="s5">'Obsoletes-Dist'</span><span class="s4">, </span><span class="s5">'Project-URL'</span><span class="s4">, </span><span class="s5">'Provides-Dist'</span><span class="s4">, </span><span class="s5">'Requires-Dist'</span><span class="s4">,</span>
+               <span class="s5">'Requires-Python'</span><span class="s4">, </span><span class="s5">'Requires-External'</span><span class="s4">, </span><span class="s5">'Private-Version'</span><span class="s4">, </span><span class="s5">'Obsoleted-By'</span><span class="s4">, </span><span class="s5">'Setup-Requires-Dist'</span><span class="s4">,</span>
+               <span class="s5">'Extension'</span><span class="s4">, </span><span class="s5">'Provides-Extra'</span><span class="s4">)</span>
+
+<span class="s1">_426_MARKERS </span><span class="s4">= (</span><span class="s5">'Private-Version'</span><span class="s4">, </span><span class="s5">'Provides-Extra'</span><span class="s4">, </span><span class="s5">'Obsoleted-By'</span><span class="s4">, </span><span class="s5">'Setup-Requires-Dist'</span><span class="s4">, </span><span class="s5">'Extension'</span><span class="s4">)</span>
+
+<span class="s0"># See issue #106: Sometimes 'Requires' and 'Provides' occur wrongly in</span>
+<span class="s0"># the metadata. Include them in the tuple literal below to allow them</span>
+<span class="s0"># (for now).</span>
+<span class="s0"># Ditto for Obsoletes - see issue #140.</span>
+<span class="s1">_566_FIELDS </span><span class="s4">= </span><span class="s1">_426_FIELDS </span><span class="s4">+ (</span><span class="s5">'Description-Content-Type'</span><span class="s4">, </span><span class="s5">'Requires'</span><span class="s4">, </span><span class="s5">'Provides'</span><span class="s4">, </span><span class="s5">'Obsoletes'</span><span class="s4">)</span>
+
+<span class="s1">_566_MARKERS </span><span class="s4">= (</span><span class="s5">'Description-Content-Type'</span><span class="s4">, )</span>
+
+<span class="s1">_643_MARKERS </span><span class="s4">= (</span><span class="s5">'Dynamic'</span><span class="s4">, </span><span class="s5">'License-File'</span><span class="s4">)</span>
+
+<span class="s1">_643_FIELDS </span><span class="s4">= </span><span class="s1">_566_FIELDS </span><span class="s4">+ </span><span class="s1">_643_MARKERS</span>
+
+<span class="s1">_ALL_FIELDS </span><span class="s4">= </span><span class="s1">set</span><span class="s4">()</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_241_FIELDS</span><span class="s4">)</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_314_FIELDS</span><span class="s4">)</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_345_FIELDS</span><span class="s4">)</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_426_FIELDS</span><span class="s4">)</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_566_FIELDS</span><span class="s4">)</span>
+<span class="s1">_ALL_FIELDS</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">_643_FIELDS</span><span class="s4">)</span>
+
+<span class="s1">EXTRA_RE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'''extra\s*==\s*(&quot;([^&quot;]+)&quot;|'([^']+)')'''</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_version2fieldlist</span><span class="s4">(</span><span class="s1">version</span><span class="s4">):</span>
+    <span class="s3">if </span><span class="s1">version </span><span class="s4">== </span><span class="s5">'1.0'</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">_241_FIELDS</span>
+    <span class="s3">elif </span><span class="s1">version </span><span class="s4">== </span><span class="s5">'1.1'</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">_314_FIELDS</span>
+    <span class="s3">elif </span><span class="s1">version </span><span class="s4">== </span><span class="s5">'1.2'</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">_345_FIELDS</span>
+    <span class="s3">elif </span><span class="s1">version </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'1.3'</span><span class="s4">, </span><span class="s5">'2.1'</span><span class="s4">):</span>
+        <span class="s0"># avoid adding field names if already there</span>
+        <span class="s3">return </span><span class="s1">_345_FIELDS </span><span class="s4">+ </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">f </span><span class="s3">for </span><span class="s1">f </span><span class="s3">in </span><span class="s1">_566_FIELDS </span><span class="s3">if </span><span class="s1">f </span><span class="s3">not in </span><span class="s1">_345_FIELDS</span><span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">version </span><span class="s4">== </span><span class="s5">'2.0'</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'Metadata 2.0 is withdrawn and not supported'</span><span class="s4">)</span>
+        <span class="s0"># return _426_FIELDS</span>
+    <span class="s3">elif </span><span class="s1">version </span><span class="s4">== </span><span class="s5">'2.2'</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">_643_FIELDS</span>
+    <span class="s3">raise </span><span class="s1">MetadataUnrecognizedVersionError</span><span class="s4">(</span><span class="s1">version</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_best_version</span><span class="s4">(</span><span class="s1">fields</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Detect the best version depending on the fields used.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">_has_marker</span><span class="s4">(</span><span class="s1">keys</span><span class="s4">, </span><span class="s1">markers</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">any</span><span class="s4">(</span><span class="s1">marker </span><span class="s3">in </span><span class="s1">keys </span><span class="s3">for </span><span class="s1">marker </span><span class="s3">in </span><span class="s1">markers</span><span class="s4">)</span>
+
+    <span class="s1">keys </span><span class="s4">= [</span><span class="s1">key </span><span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value </span><span class="s3">in </span><span class="s1">fields</span><span class="s4">.</span><span class="s1">items</span><span class="s4">() </span><span class="s3">if </span><span class="s1">value </span><span class="s3">not in </span><span class="s4">([], </span><span class="s5">'UNKNOWN'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)]</span>
+    <span class="s1">possible_versions </span><span class="s4">= [</span><span class="s5">'1.0'</span><span class="s4">, </span><span class="s5">'1.1'</span><span class="s4">, </span><span class="s5">'1.2'</span><span class="s4">, </span><span class="s5">'1.3'</span><span class="s4">, </span><span class="s5">'2.1'</span><span class="s4">, </span><span class="s5">'2.2'</span><span class="s4">]  </span><span class="s0"># 2.0 removed</span>
+
+    <span class="s0"># first let's try to see if a field is not part of one of the version</span>
+    <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">keys</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_241_FIELDS </span><span class="s3">and </span><span class="s5">'1.0' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'1.0'</span><span class="s4">)</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 1.0 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_314_FIELDS </span><span class="s3">and </span><span class="s5">'1.1' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'1.1'</span><span class="s4">)</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 1.1 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_345_FIELDS </span><span class="s3">and </span><span class="s5">'1.2' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'1.2'</span><span class="s4">)</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 1.2 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_566_FIELDS </span><span class="s3">and </span><span class="s5">'1.3' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'1.3'</span><span class="s4">)</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 1.3 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_566_FIELDS </span><span class="s3">and </span><span class="s5">'2.1' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s4">!= </span><span class="s5">'Description'</span><span class="s4">:  </span><span class="s0"># In 2.1, description allowed after headers</span>
+                <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'2.1'</span><span class="s4">)</span>
+                <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 2.1 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">_643_FIELDS </span><span class="s3">and </span><span class="s5">'2.2' </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s1">possible_versions</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s5">'2.2'</span><span class="s4">)</span>
+            <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Removed 2.2 due to %s'</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s0"># if key not in _426_FIELDS and '2.0' in possible_versions:</span>
+        <span class="s0"># possible_versions.remove('2.0')</span>
+        <span class="s0"># logger.debug('Removed 2.0 due to %s', key)</span>
+
+    <span class="s0"># possible_version contains qualified versions</span>
+    <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">possible_versions</span><span class="s4">) == </span><span class="s6">1</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">possible_versions</span><span class="s4">[</span><span class="s6">0</span><span class="s4">]  </span><span class="s0"># found !</span>
+    <span class="s3">elif </span><span class="s1">len</span><span class="s4">(</span><span class="s1">possible_versions</span><span class="s4">) == </span><span class="s6">0</span><span class="s4">:</span>
+        <span class="s1">logger</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s5">'Out of options - unknown metadata set: %s'</span><span class="s4">, </span><span class="s1">fields</span><span class="s4">)</span>
+        <span class="s3">raise </span><span class="s1">MetadataConflictError</span><span class="s4">(</span><span class="s5">'Unknown metadata set'</span><span class="s4">)</span>
+
+    <span class="s0"># let's see if one unique marker is found</span>
+    <span class="s1">is_1_1 </span><span class="s4">= </span><span class="s5">'1.1' </span><span class="s3">in </span><span class="s1">possible_versions </span><span class="s3">and </span><span class="s1">_has_marker</span><span class="s4">(</span><span class="s1">keys</span><span class="s4">, </span><span class="s1">_314_MARKERS</span><span class="s4">)</span>
+    <span class="s1">is_1_2 </span><span class="s4">= </span><span class="s5">'1.2' </span><span class="s3">in </span><span class="s1">possible_versions </span><span class="s3">and </span><span class="s1">_has_marker</span><span class="s4">(</span><span class="s1">keys</span><span class="s4">, </span><span class="s1">_345_MARKERS</span><span class="s4">)</span>
+    <span class="s1">is_2_1 </span><span class="s4">= </span><span class="s5">'2.1' </span><span class="s3">in </span><span class="s1">possible_versions </span><span class="s3">and </span><span class="s1">_has_marker</span><span class="s4">(</span><span class="s1">keys</span><span class="s4">, </span><span class="s1">_566_MARKERS</span><span class="s4">)</span>
+    <span class="s0"># is_2_0 = '2.0' in possible_versions and _has_marker(keys, _426_MARKERS)</span>
+    <span class="s1">is_2_2 </span><span class="s4">= </span><span class="s5">'2.2' </span><span class="s3">in </span><span class="s1">possible_versions </span><span class="s3">and </span><span class="s1">_has_marker</span><span class="s4">(</span><span class="s1">keys</span><span class="s4">, </span><span class="s1">_643_MARKERS</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">int</span><span class="s4">(</span><span class="s1">is_1_1</span><span class="s4">) + </span><span class="s1">int</span><span class="s4">(</span><span class="s1">is_1_2</span><span class="s4">) + </span><span class="s1">int</span><span class="s4">(</span><span class="s1">is_2_1</span><span class="s4">) + </span><span class="s1">int</span><span class="s4">(</span><span class="s1">is_2_2</span><span class="s4">) &gt; </span><span class="s6">1</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">MetadataConflictError</span><span class="s4">(</span><span class="s5">'You used incompatible 1.1/1.2/2.1/2.2 fields'</span><span class="s4">)</span>
+
+    <span class="s0"># we have the choice, 1.0, or 1.2, 2.1 or 2.2</span>
+    <span class="s0">#   - 1.0 has a broken Summary field but works with all tools</span>
+    <span class="s0">#   - 1.1 is to avoid</span>
+    <span class="s0">#   - 1.2 fixes Summary but has little adoption</span>
+    <span class="s0">#   - 2.1 adds more features</span>
+    <span class="s0">#   - 2.2 is the latest</span>
+    <span class="s3">if not </span><span class="s1">is_1_1 </span><span class="s3">and not </span><span class="s1">is_1_2 </span><span class="s3">and not </span><span class="s1">is_2_1 </span><span class="s3">and not </span><span class="s1">is_2_2</span><span class="s4">:</span>
+        <span class="s0"># we couldn't find any specific marker</span>
+        <span class="s3">if </span><span class="s1">PKG_INFO_PREFERRED_VERSION </span><span class="s3">in </span><span class="s1">possible_versions</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">PKG_INFO_PREFERRED_VERSION</span>
+    <span class="s3">if </span><span class="s1">is_1_1</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s5">'1.1'</span>
+    <span class="s3">if </span><span class="s1">is_1_2</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s5">'1.2'</span>
+    <span class="s3">if </span><span class="s1">is_2_1</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s5">'2.1'</span>
+    <span class="s0"># if is_2_2:</span>
+    <span class="s0"># return '2.2'</span>
+
+    <span class="s3">return </span><span class="s5">'2.2'</span>
+
+
+<span class="s0"># This follows the rules about transforming keys as described in</span>
+<span class="s0"># https://www.python.org/dev/peps/pep-0566/#id17</span>
+<span class="s1">_ATTR2FIELD </span><span class="s4">= {</span><span class="s1">name</span><span class="s4">.</span><span class="s1">lower</span><span class="s4">().</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">&quot;-&quot;</span><span class="s4">, </span><span class="s5">&quot;_&quot;</span><span class="s4">): </span><span class="s1">name </span><span class="s3">for </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ALL_FIELDS</span><span class="s4">}</span>
+<span class="s1">_FIELD2ATTR </span><span class="s4">= {</span><span class="s1">field</span><span class="s4">: </span><span class="s1">attr </span><span class="s3">for </span><span class="s1">attr</span><span class="s4">, </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_ATTR2FIELD</span><span class="s4">.</span><span class="s1">items</span><span class="s4">()}</span>
+
+<span class="s1">_PREDICATE_FIELDS </span><span class="s4">= (</span><span class="s5">'Requires-Dist'</span><span class="s4">, </span><span class="s5">'Obsoletes-Dist'</span><span class="s4">, </span><span class="s5">'Provides-Dist'</span><span class="s4">)</span>
+<span class="s1">_VERSIONS_FIELDS </span><span class="s4">= (</span><span class="s5">'Requires-Python'</span><span class="s4">, )</span>
+<span class="s1">_VERSION_FIELDS </span><span class="s4">= (</span><span class="s5">'Version'</span><span class="s4">, )</span>
+<span class="s1">_LISTFIELDS </span><span class="s4">= (</span><span class="s5">'Platform'</span><span class="s4">, </span><span class="s5">'Classifier'</span><span class="s4">, </span><span class="s5">'Obsoletes'</span><span class="s4">, </span><span class="s5">'Requires'</span><span class="s4">, </span><span class="s5">'Provides'</span><span class="s4">, </span><span class="s5">'Obsoletes-Dist'</span><span class="s4">, </span><span class="s5">'Provides-Dist'</span><span class="s4">,</span>
+               <span class="s5">'Requires-Dist'</span><span class="s4">, </span><span class="s5">'Requires-External'</span><span class="s4">, </span><span class="s5">'Project-URL'</span><span class="s4">, </span><span class="s5">'Supported-Platform'</span><span class="s4">, </span><span class="s5">'Setup-Requires-Dist'</span><span class="s4">,</span>
+               <span class="s5">'Provides-Extra'</span><span class="s4">, </span><span class="s5">'Extension'</span><span class="s4">, </span><span class="s5">'License-File'</span><span class="s4">)</span>
+<span class="s1">_LISTTUPLEFIELDS </span><span class="s4">= (</span><span class="s5">'Project-URL'</span><span class="s4">, )</span>
+
+<span class="s1">_ELEMENTSFIELD </span><span class="s4">= (</span><span class="s5">'Keywords'</span><span class="s4">, )</span>
+
+<span class="s1">_UNICODEFIELDS </span><span class="s4">= (</span><span class="s5">'Author'</span><span class="s4">, </span><span class="s5">'Maintainer'</span><span class="s4">, </span><span class="s5">'Summary'</span><span class="s4">, </span><span class="s5">'Description'</span><span class="s4">)</span>
+
+<span class="s1">_MISSING </span><span class="s4">= </span><span class="s1">object</span><span class="s4">()</span>
+
+<span class="s1">_FILESAFE </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'[^A-Za-z0-9.]+'</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_get_name_and_version</span><span class="s4">(</span><span class="s1">name</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">for_filename</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Return the distribution name with version. 
+ 
+    If for_filename is true, return a filename-escaped form.&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">for_filename</span><span class="s4">:</span>
+        <span class="s0"># For both name and version any runs of non-alphanumeric or '.'</span>
+        <span class="s0"># characters are replaced with a single '-'.  Additionally any</span>
+        <span class="s0"># spaces in the version string become '.'</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">_FILESAFE</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">'-'</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+        <span class="s1">version </span><span class="s4">= </span><span class="s1">_FILESAFE</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">'-'</span><span class="s4">, </span><span class="s1">version</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">' '</span><span class="s4">, </span><span class="s5">'.'</span><span class="s4">))</span>
+    <span class="s3">return </span><span class="s5">'%s-%s' </span><span class="s4">% (</span><span class="s1">name</span><span class="s4">, </span><span class="s1">version</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">LegacyMetadata</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;The legacy metadata of a release. 
+ 
+    Supports versions 1.0, 1.1, 1.2, 2.0 and 1.3/2.1 (auto-detected). You can 
+    instantiate the class with one of these arguments (or none): 
+    - *path*, the path to a metadata file 
+    - *fileobj* give a file-like object with metadata as content 
+    - *mapping* is a dict-like object 
+    - *scheme* is a version scheme name 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># TODO document the mapping API and UNKNOWN default key</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">mapping</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">=</span><span class="s5">'default'</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s4">[</span><span class="s1">path</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">, </span><span class="s1">mapping</span><span class="s4">].</span><span class="s1">count</span><span class="s4">(</span><span class="s3">None</span><span class="s4">) &lt; </span><span class="s6">2</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s5">'path, fileobj and mapping are exclusive'</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_fields </span><span class="s4">= {}</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">requires_files </span><span class="s4">= []</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_dependencies </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">scheme </span><span class="s4">= </span><span class="s1">scheme</span>
+        <span class="s3">if </span><span class="s1">path </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s1">path</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">fileobj </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">read_file</span><span class="s4">(</span><span class="s1">fileobj</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">mapping </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">mapping</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">set_metadata_version</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">set_metadata_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">] = </span><span class="s1">_best_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_write_field</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">, </span><span class="s1">name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s1">fileobj</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s5">'%s: %s</span><span class="s3">\n</span><span class="s5">' </span><span class="s4">% (</span><span class="s1">name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__getitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">set</span><span class="s4">(</span><span class="s1">name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__delitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s1">field_name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">del </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">field_name</span><span class="s4">]</span>
+        <span class="s3">except </span><span class="s1">KeyError</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">KeyError</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__contains__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">(</span><span class="s1">name </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">) </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ALL_FIELDS</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">name</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">name</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">'-'</span><span class="s4">, </span><span class="s5">'_'</span><span class="s4">).</span><span class="s1">lower</span><span class="s4">()</span>
+        <span class="s3">return </span><span class="s1">_ATTR2FIELD</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">name</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_default_value</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_LISTFIELDS </span><span class="s3">or </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ELEMENTSFIELD</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s4">[]</span>
+        <span class="s3">return </span><span class="s5">'UNKNOWN'</span>
+
+    <span class="s3">def </span><span class="s1">_remove_line_prefix</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">metadata_version </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'1.0'</span><span class="s4">, </span><span class="s5">'1.1'</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">_LINE_PREFIX_PRE_1_2</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n</span><span class="s5">'</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">_LINE_PREFIX_1_2</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n</span><span class="s5">'</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__getattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ATTR2FIELD</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+        <span class="s3">raise </span><span class="s1">AttributeError</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+
+    <span class="s0">#</span>
+    <span class="s0"># Public API</span>
+    <span class="s0">#</span>
+
+    <span class="s3">def </span><span class="s1">get_fullname</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">filesafe</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Return the distribution name with version. 
+ 
+        If filesafe is true, return a filename-escaped form. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">_get_name_and_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Name'</span><span class="s4">], </span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Version'</span><span class="s4">], </span><span class="s1">filesafe</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">is_field</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;return True if name is a valid metadata key&quot;&quot;&quot;</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ALL_FIELDS</span>
+
+    <span class="s3">def </span><span class="s1">is_multi_field</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_LISTFIELDS</span>
+
+    <span class="s3">def </span><span class="s1">read</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">filepath</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Read the metadata values from a file path.&quot;&quot;&quot;</span>
+        <span class="s1">fp </span><span class="s4">= </span><span class="s1">codecs</span><span class="s4">.</span><span class="s1">open</span><span class="s4">(</span><span class="s1">filepath</span><span class="s4">, </span><span class="s5">'r'</span><span class="s4">, </span><span class="s1">encoding</span><span class="s4">=</span><span class="s5">'utf-8'</span><span class="s4">)</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">read_file</span><span class="s4">(</span><span class="s1">fp</span><span class="s4">)</span>
+        <span class="s3">finally</span><span class="s4">:</span>
+            <span class="s1">fp</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">read_file</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">fileob</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Read the metadata values from a file object.&quot;&quot;&quot;</span>
+        <span class="s1">msg </span><span class="s4">= </span><span class="s1">message_from_file</span><span class="s4">(</span><span class="s1">fileob</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">] = </span><span class="s1">msg</span><span class="s4">[</span><span class="s5">'metadata-version'</span><span class="s4">]</span>
+
+        <span class="s0"># When reading, get all the fields we can</span>
+        <span class="s3">for </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_ALL_FIELDS</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">field </span><span class="s3">not in </span><span class="s1">msg</span><span class="s4">:</span>
+                <span class="s3">continue</span>
+            <span class="s3">if </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_LISTFIELDS</span><span class="s4">:</span>
+                <span class="s0"># we can have multiple lines</span>
+                <span class="s1">values </span><span class="s4">= </span><span class="s1">msg</span><span class="s4">.</span><span class="s1">get_all</span><span class="s4">(</span><span class="s1">field</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_LISTTUPLEFIELDS </span><span class="s3">and </span><span class="s1">values </span><span class="s3">is not None</span><span class="s4">:</span>
+                    <span class="s1">values </span><span class="s4">= [</span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">value</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">','</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">value </span><span class="s3">in </span><span class="s1">values</span><span class="s4">]</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">set</span><span class="s4">(</span><span class="s1">field</span><span class="s4">, </span><span class="s1">values</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># single line</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">msg</span><span class="s4">[</span><span class="s1">field</span><span class="s4">]</span>
+                <span class="s3">if </span><span class="s1">value </span><span class="s3">is not None and </span><span class="s1">value </span><span class="s4">!= </span><span class="s5">'UNKNOWN'</span><span class="s4">:</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">set</span><span class="s4">(</span><span class="s1">field</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s0"># PEP 566 specifies that the body be used for the description, if</span>
+        <span class="s0"># available</span>
+        <span class="s1">body </span><span class="s4">= </span><span class="s1">msg</span><span class="s4">.</span><span class="s1">get_payload</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">[</span><span class="s5">&quot;Description&quot;</span><span class="s4">] = </span><span class="s1">body </span><span class="s3">if </span><span class="s1">body </span><span class="s3">else </span><span class="s1">self</span><span class="s4">[</span><span class="s5">&quot;Description&quot;</span><span class="s4">]</span>
+        <span class="s0"># logger.debug('Attempting to set metadata for %s', self)</span>
+        <span class="s0"># self.set_metadata_version()</span>
+
+    <span class="s3">def </span><span class="s1">write</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">filepath</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Write the metadata fields to filepath.&quot;&quot;&quot;</span>
+        <span class="s1">fp </span><span class="s4">= </span><span class="s1">codecs</span><span class="s4">.</span><span class="s1">open</span><span class="s4">(</span><span class="s1">filepath</span><span class="s4">, </span><span class="s5">'w'</span><span class="s4">, </span><span class="s1">encoding</span><span class="s4">=</span><span class="s5">'utf-8'</span><span class="s4">)</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">write_file</span><span class="s4">(</span><span class="s1">fp</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">)</span>
+        <span class="s3">finally</span><span class="s4">:</span>
+            <span class="s1">fp</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">write_file</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">fileobject</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Write the PKG-INFO format data to a file object.&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">set_metadata_version</span><span class="s4">()</span>
+
+        <span class="s3">for </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_version2fieldlist</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">]):</span>
+            <span class="s1">values </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">field</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">skip_unknown </span><span class="s3">and </span><span class="s1">values </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'UNKNOWN'</span><span class="s4">, [], [</span><span class="s5">'UNKNOWN'</span><span class="s4">]):</span>
+                <span class="s3">continue</span>
+            <span class="s3">if </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_ELEMENTSFIELD</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_write_field</span><span class="s4">(</span><span class="s1">fileobject</span><span class="s4">, </span><span class="s1">field</span><span class="s4">, </span><span class="s5">','</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">values</span><span class="s4">))</span>
+                <span class="s3">continue</span>
+            <span class="s3">if </span><span class="s1">field </span><span class="s3">not in </span><span class="s1">_LISTFIELDS</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">field </span><span class="s4">== </span><span class="s5">'Description'</span><span class="s4">:</span>
+                    <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">metadata_version </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'1.0'</span><span class="s4">, </span><span class="s5">'1.1'</span><span class="s4">):</span>
+                        <span class="s1">values </span><span class="s4">= </span><span class="s1">values</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n</span><span class="s5">'</span><span class="s4">, </span><span class="s5">'</span><span class="s3">\n        </span><span class="s5">'</span><span class="s4">)</span>
+                    <span class="s3">else</span><span class="s4">:</span>
+                        <span class="s1">values </span><span class="s4">= </span><span class="s1">values</span><span class="s4">.</span><span class="s1">replace</span><span class="s4">(</span><span class="s5">'</span><span class="s3">\n</span><span class="s5">'</span><span class="s4">, </span><span class="s5">'</span><span class="s3">\n       </span><span class="s5">|'</span><span class="s4">)</span>
+                <span class="s1">values </span><span class="s4">= [</span><span class="s1">values</span><span class="s4">]</span>
+
+            <span class="s3">if </span><span class="s1">field </span><span class="s3">in </span><span class="s1">_LISTTUPLEFIELDS</span><span class="s4">:</span>
+                <span class="s1">values </span><span class="s4">= [</span><span class="s5">','</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">value</span><span class="s4">) </span><span class="s3">for </span><span class="s1">value </span><span class="s3">in </span><span class="s1">values</span><span class="s4">]</span>
+
+            <span class="s3">for </span><span class="s1">value </span><span class="s3">in </span><span class="s1">values</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_write_field</span><span class="s4">(</span><span class="s1">fileobject</span><span class="s4">, </span><span class="s1">field</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Set metadata values from the given iterable `other` and kwargs. 
+ 
+        Behavior is like `dict.update`: If `other` has a ``keys`` method, 
+        they are looped over and ``self[key]`` is assigned ``other[key]``. 
+        Else, ``other`` is an iterable of ``(key, value)`` iterables. 
+ 
+        Keys that don't match a metadata field or that have an empty value are 
+        dropped. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">_set</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">_ATTR2FIELD </span><span class="s3">and </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">key</span><span class="s4">), </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s3">if not </span><span class="s1">other</span><span class="s4">:</span>
+            <span class="s0"># other is None or empty container</span>
+            <span class="s3">pass</span>
+        <span class="s3">elif </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">other</span><span class="s4">, </span><span class="s5">'keys'</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">k </span><span class="s3">in </span><span class="s1">other</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">():</span>
+                <span class="s1">_set</span><span class="s4">(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">other</span><span class="s4">[</span><span class="s1">k</span><span class="s4">])</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">for </span><span class="s1">k</span><span class="s4">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">other</span><span class="s4">:</span>
+                <span class="s1">_set</span><span class="s4">(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">v</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">kwargs</span><span class="s4">:</span>
+            <span class="s3">for </span><span class="s1">k</span><span class="s4">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">kwargs</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+                <span class="s1">_set</span><span class="s4">(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">v</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Control then set a metadata field.&quot;&quot;&quot;</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s4">((</span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ELEMENTSFIELD </span><span class="s3">or </span><span class="s1">name </span><span class="s4">== </span><span class="s5">'Platform'</span><span class="s4">) </span><span class="s3">and not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, (</span><span class="s1">list</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">))):</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+                <span class="s1">value </span><span class="s4">= [</span><span class="s1">v</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">() </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">value</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">','</span><span class="s4">)]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= []</span>
+        <span class="s3">elif </span><span class="s4">(</span><span class="s1">name </span><span class="s3">in </span><span class="s1">_LISTFIELDS </span><span class="s3">and not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, (</span><span class="s1">list</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">))):</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+                <span class="s1">value </span><span class="s4">= [</span><span class="s1">value</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= []</span>
+
+        <span class="s3">if </span><span class="s1">logger</span><span class="s4">.</span><span class="s1">isEnabledFor</span><span class="s4">(</span><span class="s1">logging</span><span class="s4">.</span><span class="s1">WARNING</span><span class="s4">):</span>
+            <span class="s1">project_name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Name'</span><span class="s4">]</span>
+
+            <span class="s1">scheme </span><span class="s4">= </span><span class="s1">get_scheme</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">scheme</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_PREDICATE_FIELDS </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                    <span class="s0"># check that the values are valid</span>
+                    <span class="s3">if not </span><span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_matcher</span><span class="s4">(</span><span class="s1">v</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">';'</span><span class="s4">)[</span><span class="s6">0</span><span class="s4">]):</span>
+                        <span class="s1">logger</span><span class="s4">.</span><span class="s1">warning</span><span class="s4">(</span><span class="s5">&quot;'%s': '%s' is not valid (field '%s')&quot;</span><span class="s4">, </span><span class="s1">project_name</span><span class="s4">, </span><span class="s1">v</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+            <span class="s0"># FIXME this rejects UNKNOWN, is that right?</span>
+            <span class="s3">elif </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_VERSIONS_FIELDS </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s3">if not </span><span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_constraint_list</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+                    <span class="s1">logger</span><span class="s4">.</span><span class="s1">warning</span><span class="s4">(</span><span class="s5">&quot;'%s': '%s' is not a valid version (field '%s')&quot;</span><span class="s4">, </span><span class="s1">project_name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+            <span class="s3">elif </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_VERSION_FIELDS </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s3">if not </span><span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_version</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+                    <span class="s1">logger</span><span class="s4">.</span><span class="s1">warning</span><span class="s4">(</span><span class="s5">&quot;'%s': '%s' is not a valid version (field '%s')&quot;</span><span class="s4">, </span><span class="s1">project_name</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_UNICODEFIELDS</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">name </span><span class="s4">== </span><span class="s5">'Description'</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_remove_line_prefix</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">name</span><span class="s4">] = </span><span class="s1">value</span>
+
+    <span class="s3">def </span><span class="s1">get</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">, </span><span class="s1">default</span><span class="s4">=</span><span class="s1">_MISSING</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Get a metadata field.&quot;&quot;&quot;</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_convert_name</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">default </span><span class="s3">is </span><span class="s1">_MISSING</span><span class="s4">:</span>
+                <span class="s1">default </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_default_value</span><span class="s4">(</span><span class="s1">name</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">default</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_UNICODEFIELDS</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+            <span class="s3">return </span><span class="s1">value</span>
+        <span class="s3">elif </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_LISTFIELDS</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">value </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">return </span><span class="s4">[]</span>
+            <span class="s1">res </span><span class="s4">= []</span>
+            <span class="s3">for </span><span class="s1">val </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">name </span><span class="s3">not in </span><span class="s1">_LISTTUPLEFIELDS</span><span class="s4">:</span>
+                    <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">val</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s0"># That's for Project-URL</span>
+                    <span class="s1">res</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s1">val</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s1">val</span><span class="s4">[</span><span class="s6">1</span><span class="s4">]))</span>
+            <span class="s3">return </span><span class="s1">res</span>
+
+        <span class="s3">elif </span><span class="s1">name </span><span class="s3">in </span><span class="s1">_ELEMENTSFIELD</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+                <span class="s3">return </span><span class="s1">value</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">','</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">[</span><span class="s1">name</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">check</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">strict</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Check if the metadata is compliant. If strict is True then raise if 
+        no Name or Version are provided&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">set_metadata_version</span><span class="s4">()</span>
+
+        <span class="s0"># XXX should check the versions (if the file was loaded)</span>
+        <span class="s1">missing</span><span class="s4">, </span><span class="s1">warnings </span><span class="s4">= [], []</span>
+
+        <span class="s3">for </span><span class="s1">attr </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'Name'</span><span class="s4">, </span><span class="s5">'Version'</span><span class="s4">):  </span><span class="s0"># required by PEP 345</span>
+            <span class="s3">if </span><span class="s1">attr </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">missing</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">attr</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">strict </span><span class="s3">and </span><span class="s1">missing </span><span class="s4">!= []:</span>
+            <span class="s1">msg </span><span class="s4">= </span><span class="s5">'missing required metadata: %s' </span><span class="s4">% </span><span class="s5">', '</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">missing</span><span class="s4">)</span>
+            <span class="s3">raise </span><span class="s1">MetadataMissingError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">attr </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'Home-page'</span><span class="s4">, </span><span class="s5">'Author'</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">attr </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">missing</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">attr</span><span class="s4">)</span>
+
+        <span class="s0"># checking metadata 1.2 (XXX needs to check 1.1, 1.0)</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">] != </span><span class="s5">'1.2'</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">missing</span><span class="s4">, </span><span class="s1">warnings</span>
+
+        <span class="s1">scheme </span><span class="s4">= </span><span class="s1">get_scheme</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">scheme</span><span class="s4">)</span>
+
+        <span class="s3">def </span><span class="s1">are_valid_constraints</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s3">if not </span><span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_matcher</span><span class="s4">(</span><span class="s1">v</span><span class="s4">.</span><span class="s1">split</span><span class="s4">(</span><span class="s5">';'</span><span class="s4">)[</span><span class="s6">0</span><span class="s4">]):</span>
+                    <span class="s3">return False</span>
+            <span class="s3">return True</span>
+
+        <span class="s3">for </span><span class="s1">fields</span><span class="s4">, </span><span class="s1">controller </span><span class="s3">in </span><span class="s4">((</span><span class="s1">_PREDICATE_FIELDS</span><span class="s4">, </span><span class="s1">are_valid_constraints</span><span class="s4">),</span>
+                                   <span class="s4">(</span><span class="s1">_VERSIONS_FIELDS</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_constraint_list</span><span class="s4">), (</span><span class="s1">_VERSION_FIELDS</span><span class="s4">,</span>
+                                                                                         <span class="s1">scheme</span><span class="s4">.</span><span class="s1">is_valid_version</span><span class="s4">)):</span>
+            <span class="s3">for </span><span class="s1">field </span><span class="s3">in </span><span class="s1">fields</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">field</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">value </span><span class="s3">is not None and not </span><span class="s1">controller</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+                    <span class="s1">warnings</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s5">&quot;Wrong value for '%s': %s&quot; </span><span class="s4">% (</span><span class="s1">field</span><span class="s4">, </span><span class="s1">value</span><span class="s4">))</span>
+
+        <span class="s3">return </span><span class="s1">missing</span><span class="s4">, </span><span class="s1">warnings</span>
+
+    <span class="s3">def </span><span class="s1">todict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">skip_missing</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Return fields as a dict. 
+ 
+        Field names will be converted to use the underscore-lowercase style 
+        instead of hyphen-mixed case (i.e. home_page instead of Home-page). 
+        This is as per https://www.python.org/dev/peps/pep-0566/#id17. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">set_metadata_version</span><span class="s4">()</span>
+
+        <span class="s1">fields </span><span class="s4">= </span><span class="s1">_version2fieldlist</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">])</span>
+
+        <span class="s1">data </span><span class="s4">= {}</span>
+
+        <span class="s3">for </span><span class="s1">field_name </span><span class="s3">in </span><span class="s1">fields</span><span class="s4">:</span>
+            <span class="s3">if not </span><span class="s1">skip_missing </span><span class="s3">or </span><span class="s1">field_name </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_fields</span><span class="s4">:</span>
+                <span class="s1">key </span><span class="s4">= </span><span class="s1">_FIELD2ATTR</span><span class="s4">[</span><span class="s1">field_name</span><span class="s4">]</span>
+                <span class="s3">if </span><span class="s1">key </span><span class="s4">!= </span><span class="s5">'project_url'</span><span class="s4">:</span>
+                    <span class="s1">data</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">self</span><span class="s4">[</span><span class="s1">field_name</span><span class="s4">]</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">data</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = [</span><span class="s5">','</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">u</span><span class="s4">) </span><span class="s3">for </span><span class="s1">u </span><span class="s3">in </span><span class="s1">self</span><span class="s4">[</span><span class="s1">field_name</span><span class="s4">]]</span>
+
+        <span class="s3">return </span><span class="s1">data</span>
+
+    <span class="s3">def </span><span class="s1">add_requirements</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">requirements</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">] == </span><span class="s5">'1.1'</span><span class="s4">:</span>
+            <span class="s0"># we can't have 1.1 metadata *and* Setuptools requires</span>
+            <span class="s3">for </span><span class="s1">field </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'Obsoletes'</span><span class="s4">, </span><span class="s5">'Requires'</span><span class="s4">, </span><span class="s5">'Provides'</span><span class="s4">):</span>
+                <span class="s3">if </span><span class="s1">field </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                    <span class="s3">del </span><span class="s1">self</span><span class="s4">[</span><span class="s1">field</span><span class="s4">]</span>
+        <span class="s1">self</span><span class="s4">[</span><span class="s5">'Requires-Dist'</span><span class="s4">] += </span><span class="s1">requirements</span>
+
+    <span class="s0"># Mapping API</span>
+    <span class="s0"># TODO could add iter* variants</span>
+
+    <span class="s3">def </span><span class="s1">keys</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">list</span><span class="s4">(</span><span class="s1">_version2fieldlist</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s5">'Metadata-Version'</span><span class="s4">]))</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">():</span>
+            <span class="s3">yield </span><span class="s1">key</span>
+
+    <span class="s3">def </span><span class="s1">values</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">[</span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] </span><span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">()]</span>
+
+    <span class="s3">def </span><span class="s1">items</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">[(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]) </span><span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">keys</span><span class="s4">()]</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s5">'&lt;%s %s %s&gt;' </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">name</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version</span><span class="s4">)</span>
+
+
+<span class="s1">METADATA_FILENAME </span><span class="s4">= </span><span class="s5">'pydist.json'</span>
+<span class="s1">WHEEL_METADATA_FILENAME </span><span class="s4">= </span><span class="s5">'metadata.json'</span>
+<span class="s1">LEGACY_METADATA_FILENAME </span><span class="s4">= </span><span class="s5">'METADATA'</span>
+
+
+<span class="s3">class </span><span class="s1">Metadata</span><span class="s4">(</span><span class="s1">object</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    The metadata of a release. This implementation uses 2.1 
+    metadata where possible. If not possible, it wraps a LegacyMetadata 
+    instance which handles the key-value metadata format. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">METADATA_VERSION_MATCHER </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">r'^\d+(\.\d+)*$'</span><span class="s4">)</span>
+
+    <span class="s1">NAME_MATCHER </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'^[0-9A-Z]([0-9A-Z_.-]*[0-9A-Z])?$'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">I</span><span class="s4">)</span>
+
+    <span class="s1">FIELDNAME_MATCHER </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'^[A-Z]([0-9A-Z-]*[0-9A-Z])?$'</span><span class="s4">, </span><span class="s1">re</span><span class="s4">.</span><span class="s1">I</span><span class="s4">)</span>
+
+    <span class="s1">VERSION_MATCHER </span><span class="s4">= </span><span class="s1">PEP440_VERSION_RE</span>
+
+    <span class="s1">SUMMARY_MATCHER </span><span class="s4">= </span><span class="s1">re</span><span class="s4">.</span><span class="s1">compile</span><span class="s4">(</span><span class="s5">'.{1,2047}'</span><span class="s4">)</span>
+
+    <span class="s1">METADATA_VERSION </span><span class="s4">= </span><span class="s5">'2.0'</span>
+
+    <span class="s1">GENERATOR </span><span class="s4">= </span><span class="s5">'distlib (%s)' </span><span class="s4">% </span><span class="s1">__version__</span>
+
+    <span class="s1">MANDATORY_KEYS </span><span class="s4">= {</span>
+        <span class="s5">'name'</span><span class="s4">: (),</span>
+        <span class="s5">'version'</span><span class="s4">: (),</span>
+        <span class="s5">'summary'</span><span class="s4">: (</span><span class="s5">'legacy'</span><span class="s4">, ),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">INDEX_KEYS </span><span class="s4">= (</span><span class="s5">'name version license summary description author '</span>
+                  <span class="s5">'author_email keywords platform home_page classifiers '</span>
+                  <span class="s5">'download_url'</span><span class="s4">)</span>
+
+    <span class="s1">DEPENDENCY_KEYS </span><span class="s4">= (</span><span class="s5">'extras run_requires test_requires build_requires '</span>
+                       <span class="s5">'dev_requires provides meta_requires obsoleted_by '</span>
+                       <span class="s5">'supports_environments'</span><span class="s4">)</span>
+
+    <span class="s1">SYNTAX_VALIDATORS </span><span class="s4">= {</span>
+        <span class="s5">'metadata_version'</span><span class="s4">: (</span><span class="s1">METADATA_VERSION_MATCHER</span><span class="s4">, ()),</span>
+        <span class="s5">'name'</span><span class="s4">: (</span><span class="s1">NAME_MATCHER</span><span class="s4">, (</span><span class="s5">'legacy'</span><span class="s4">, )),</span>
+        <span class="s5">'version'</span><span class="s4">: (</span><span class="s1">VERSION_MATCHER</span><span class="s4">, (</span><span class="s5">'legacy'</span><span class="s4">, )),</span>
+        <span class="s5">'summary'</span><span class="s4">: (</span><span class="s1">SUMMARY_MATCHER</span><span class="s4">, (</span><span class="s5">'legacy'</span><span class="s4">, )),</span>
+        <span class="s5">'dynamic'</span><span class="s4">: (</span><span class="s1">FIELDNAME_MATCHER</span><span class="s4">, (</span><span class="s5">'legacy'</span><span class="s4">, )),</span>
+    <span class="s4">}</span>
+
+    <span class="s1">__slots__ </span><span class="s4">= (</span><span class="s5">'_legacy'</span><span class="s4">, </span><span class="s5">'_data'</span><span class="s4">, </span><span class="s5">'scheme'</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">mapping</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">=</span><span class="s5">'default'</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s4">[</span><span class="s1">path</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">, </span><span class="s1">mapping</span><span class="s4">].</span><span class="s1">count</span><span class="s4">(</span><span class="s3">None</span><span class="s4">) &lt; </span><span class="s6">2</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span><span class="s5">'path, fileobj and mapping are exclusive'</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">scheme </span><span class="s4">= </span><span class="s1">scheme</span>
+        <span class="s0"># import pdb; pdb.set_trace()</span>
+        <span class="s3">if </span><span class="s1">mapping </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_validate_mapping</span><span class="s4">(</span><span class="s1">mapping</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= </span><span class="s1">mapping</span>
+            <span class="s3">except </span><span class="s1">MetadataUnrecognizedVersionError</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy </span><span class="s4">= </span><span class="s1">LegacyMetadata</span><span class="s4">(</span><span class="s1">mapping</span><span class="s4">=</span><span class="s1">mapping</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">=</span><span class="s1">scheme</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">validate</span><span class="s4">()</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s3">None</span>
+            <span class="s3">if </span><span class="s1">path</span><span class="s4">:</span>
+                <span class="s3">with </span><span class="s1">open</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s5">'rb'</span><span class="s4">) </span><span class="s3">as </span><span class="s1">f</span><span class="s4">:</span>
+                    <span class="s1">data </span><span class="s4">= </span><span class="s1">f</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+            <span class="s3">elif </span><span class="s1">fileobj</span><span class="s4">:</span>
+                <span class="s1">data </span><span class="s4">= </span><span class="s1">fileobj</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+            <span class="s3">if </span><span class="s1">data </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s0"># Initialised with no args - to be added</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= {</span>
+                    <span class="s5">'metadata_version'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">METADATA_VERSION</span><span class="s4">,</span>
+                    <span class="s5">'generator'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">GENERATOR</span><span class="s4">,</span>
+                <span class="s4">}</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">data</span><span class="s4">, </span><span class="s1">text_type</span><span class="s4">):</span>
+                    <span class="s1">data </span><span class="s4">= </span><span class="s1">data</span><span class="s4">.</span><span class="s1">decode</span><span class="s4">(</span><span class="s5">'utf-8'</span><span class="s4">)</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= </span><span class="s1">json</span><span class="s4">.</span><span class="s1">loads</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_validate_mapping</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">)</span>
+                <span class="s3">except </span><span class="s1">ValueError</span><span class="s4">:</span>
+                    <span class="s0"># Note: MetadataUnrecognizedVersionError does not</span>
+                    <span class="s0"># inherit from ValueError (it's a DistlibException,</span>
+                    <span class="s0"># which should not inherit from ValueError).</span>
+                    <span class="s0"># The ValueError comes from the json.load - if that</span>
+                    <span class="s0"># succeeds and we get a validation error, we want</span>
+                    <span class="s0"># that to propagate</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy </span><span class="s4">= </span><span class="s1">LegacyMetadata</span><span class="s4">(</span><span class="s1">fileobj</span><span class="s4">=</span><span class="s1">StringIO</span><span class="s4">(</span><span class="s1">data</span><span class="s4">), </span><span class="s1">scheme</span><span class="s4">=</span><span class="s1">scheme</span><span class="s4">)</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">validate</span><span class="s4">()</span>
+
+    <span class="s1">common_keys </span><span class="s4">= </span><span class="s1">set</span><span class="s4">((</span><span class="s5">'name'</span><span class="s4">, </span><span class="s5">'version'</span><span class="s4">, </span><span class="s5">'license'</span><span class="s4">, </span><span class="s5">'keywords'</span><span class="s4">, </span><span class="s5">'summary'</span><span class="s4">))</span>
+
+    <span class="s1">none_list </span><span class="s4">= (</span><span class="s3">None</span><span class="s4">, </span><span class="s1">list</span><span class="s4">)</span>
+    <span class="s1">none_dict </span><span class="s4">= (</span><span class="s3">None</span><span class="s4">, </span><span class="s1">dict</span><span class="s4">)</span>
+
+    <span class="s1">mapped_keys </span><span class="s4">= {</span>
+        <span class="s5">'run_requires'</span><span class="s4">: (</span><span class="s5">'Requires-Dist'</span><span class="s4">, </span><span class="s1">list</span><span class="s4">),</span>
+        <span class="s5">'build_requires'</span><span class="s4">: (</span><span class="s5">'Setup-Requires-Dist'</span><span class="s4">, </span><span class="s1">list</span><span class="s4">),</span>
+        <span class="s5">'dev_requires'</span><span class="s4">: </span><span class="s1">none_list</span><span class="s4">,</span>
+        <span class="s5">'test_requires'</span><span class="s4">: </span><span class="s1">none_list</span><span class="s4">,</span>
+        <span class="s5">'meta_requires'</span><span class="s4">: </span><span class="s1">none_list</span><span class="s4">,</span>
+        <span class="s5">'extras'</span><span class="s4">: (</span><span class="s5">'Provides-Extra'</span><span class="s4">, </span><span class="s1">list</span><span class="s4">),</span>
+        <span class="s5">'modules'</span><span class="s4">: </span><span class="s1">none_list</span><span class="s4">,</span>
+        <span class="s5">'namespaces'</span><span class="s4">: </span><span class="s1">none_list</span><span class="s4">,</span>
+        <span class="s5">'exports'</span><span class="s4">: </span><span class="s1">none_dict</span><span class="s4">,</span>
+        <span class="s5">'commands'</span><span class="s4">: </span><span class="s1">none_dict</span><span class="s4">,</span>
+        <span class="s5">'classifiers'</span><span class="s4">: (</span><span class="s5">'Classifier'</span><span class="s4">, </span><span class="s1">list</span><span class="s4">),</span>
+        <span class="s5">'source_url'</span><span class="s4">: (</span><span class="s5">'Download-URL'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">),</span>
+        <span class="s5">'metadata_version'</span><span class="s4">: (</span><span class="s5">'Metadata-Version'</span><span class="s4">, </span><span class="s3">None</span><span class="s4">),</span>
+    <span class="s4">}</span>
+
+    <span class="s3">del </span><span class="s1">none_list</span><span class="s4">, </span><span class="s1">none_dict</span>
+
+    <span class="s3">def </span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+        <span class="s1">common </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'common_keys'</span><span class="s4">)</span>
+        <span class="s1">mapped </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'mapped_keys'</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">mapped</span><span class="s4">:</span>
+            <span class="s1">lk</span><span class="s4">, </span><span class="s1">maker </span><span class="s4">= </span><span class="s1">mapped</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">lk </span><span class="s3">is None</span><span class="s4">:</span>
+                    <span class="s1">result </span><span class="s4">= </span><span class="s3">None if </span><span class="s1">maker </span><span class="s3">is None else </span><span class="s1">maker</span><span class="s4">()</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">lk</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s3">None if </span><span class="s1">maker </span><span class="s3">is None else </span><span class="s1">maker</span><span class="s4">()</span>
+                <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s4">(</span><span class="s5">'commands'</span><span class="s4">, </span><span class="s5">'exports'</span><span class="s4">, </span><span class="s5">'modules'</span><span class="s4">, </span><span class="s5">'namespaces'</span><span class="s4">, </span><span class="s5">'classifiers'</span><span class="s4">):</span>
+                    <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s0"># special cases for PEP 459</span>
+                    <span class="s1">sentinel </span><span class="s4">= </span><span class="s1">object</span><span class="s4">()</span>
+                    <span class="s1">result </span><span class="s4">= </span><span class="s1">sentinel</span>
+                    <span class="s1">d </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">)</span>
+                    <span class="s3">if </span><span class="s1">d</span><span class="s4">:</span>
+                        <span class="s3">if </span><span class="s1">key </span><span class="s4">== </span><span class="s5">'commands'</span><span class="s4">:</span>
+                            <span class="s1">result </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'python.commands'</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+                        <span class="s3">elif </span><span class="s1">key </span><span class="s4">== </span><span class="s5">'classifiers'</span><span class="s4">:</span>
+                            <span class="s1">d </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'python.details'</span><span class="s4">)</span>
+                            <span class="s3">if </span><span class="s1">d</span><span class="s4">:</span>
+                                <span class="s1">result </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+                        <span class="s3">else</span><span class="s4">:</span>
+                            <span class="s1">d </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'python.exports'</span><span class="s4">)</span>
+                            <span class="s3">if not </span><span class="s1">d</span><span class="s4">:</span>
+                                <span class="s1">d </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'python.exports'</span><span class="s4">)</span>
+                            <span class="s3">if </span><span class="s1">d</span><span class="s4">:</span>
+                                <span class="s1">result </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+                    <span class="s3">if </span><span class="s1">result </span><span class="s3">is </span><span class="s1">sentinel</span><span class="s4">:</span>
+                        <span class="s1">result </span><span class="s4">= </span><span class="s1">value</span>
+        <span class="s3">elif </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">common</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">_validate_value</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">SYNTAX_VALIDATORS</span><span class="s4">:</span>
+            <span class="s1">pattern</span><span class="s4">, </span><span class="s1">exclusions </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">SYNTAX_VALIDATORS</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">scheme </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">scheme</span><span class="s4">) </span><span class="s3">not in </span><span class="s1">exclusions</span><span class="s4">:</span>
+                <span class="s1">m </span><span class="s4">= </span><span class="s1">pattern</span><span class="s4">.</span><span class="s1">match</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+                <span class="s3">if not </span><span class="s1">m</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">MetadataInvalidError</span><span class="s4">(</span><span class="s5">&quot;'%s' is an invalid value for &quot;</span>
+                                               <span class="s5">&quot;the '%s' property&quot; </span><span class="s4">% (</span><span class="s1">value</span><span class="s4">, </span><span class="s1">key</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">__setattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_validate_value</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s1">common </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'common_keys'</span><span class="s4">)</span>
+        <span class="s1">mapped </span><span class="s4">= </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">'mapped_keys'</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">mapped</span><span class="s4">:</span>
+            <span class="s1">lk</span><span class="s4">, </span><span class="s1">_ </span><span class="s4">= </span><span class="s1">mapped</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">lk </span><span class="s3">is None</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">NotImplementedError</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">[</span><span class="s1">lk</span><span class="s4">] = </span><span class="s1">value</span>
+            <span class="s3">elif </span><span class="s1">key </span><span class="s3">not in </span><span class="s4">(</span><span class="s5">'commands'</span><span class="s4">, </span><span class="s5">'exports'</span><span class="s4">, </span><span class="s5">'modules'</span><span class="s4">, </span><span class="s5">'namespaces'</span><span class="s4">, </span><span class="s5">'classifiers'</span><span class="s4">):</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># special cases for PEP 459</span>
+                <span class="s1">d </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, {})</span>
+                <span class="s3">if </span><span class="s1">key </span><span class="s4">== </span><span class="s5">'commands'</span><span class="s4">:</span>
+                    <span class="s1">d</span><span class="s4">[</span><span class="s5">'python.commands'</span><span class="s4">] = </span><span class="s1">value</span>
+                <span class="s3">elif </span><span class="s1">key </span><span class="s4">== </span><span class="s5">'classifiers'</span><span class="s4">:</span>
+                    <span class="s1">d </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s5">'python.details'</span><span class="s4">, {})</span>
+                    <span class="s1">d</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">d </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s5">'python.exports'</span><span class="s4">, {})</span>
+                    <span class="s1">d</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+        <span class="s3">elif </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">common</span><span class="s4">:</span>
+            <span class="s1">object</span><span class="s4">.</span><span class="s1">__setattr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s4">== </span><span class="s5">'keywords'</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">string_types</span><span class="s4">):</span>
+                    <span class="s1">value </span><span class="s4">= </span><span class="s1">value</span><span class="s4">.</span><span class="s1">strip</span><span class="s4">()</span>
+                    <span class="s3">if </span><span class="s1">value</span><span class="s4">:</span>
+                        <span class="s1">value </span><span class="s4">= </span><span class="s1">value</span><span class="s4">.</span><span class="s1">split</span><span class="s4">()</span>
+                    <span class="s3">else</span><span class="s4">:</span>
+                        <span class="s1">value </span><span class="s4">= []</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">name_and_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">_get_name_and_version</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">name</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version</span><span class="s4">, </span><span class="s3">True</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">provides</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">[</span><span class="s5">'Provides-Dist'</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s5">'provides'</span><span class="s4">, [])</span>
+        <span class="s1">s </span><span class="s4">= </span><span class="s5">'%s (%s)' </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">name</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">s </span><span class="s3">not in </span><span class="s1">result</span><span class="s4">:</span>
+            <span class="s1">result</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s4">@</span><span class="s1">provides</span><span class="s4">.</span><span class="s1">setter</span>
+    <span class="s3">def </span><span class="s1">provides</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">[</span><span class="s5">'Provides-Dist'</span><span class="s4">] = </span><span class="s1">value</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">[</span><span class="s5">'provides'</span><span class="s4">] = </span><span class="s1">value</span>
+
+    <span class="s3">def </span><span class="s1">get_requirements</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">reqts</span><span class="s4">, </span><span class="s1">extras</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">env</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Base method to get dependencies, given a set of extras 
+        to satisfy and an optional environment context. 
+        :param reqts: A list of sometimes-wanted dependencies, 
+                      perhaps dependent on extras and environment. 
+        :param extras: A list of optional components being requested. 
+        :param env: An optional environment for marker evaluation. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">reqts</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= []</span>
+            <span class="s1">extras </span><span class="s4">= </span><span class="s1">get_extras</span><span class="s4">(</span><span class="s1">extras </span><span class="s3">or </span><span class="s4">[], </span><span class="s1">self</span><span class="s4">.</span><span class="s1">extras</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">d </span><span class="s3">in </span><span class="s1">reqts</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s5">'extra' </span><span class="s3">not in </span><span class="s1">d </span><span class="s3">and </span><span class="s5">'environment' </span><span class="s3">not in </span><span class="s1">d</span><span class="s4">:</span>
+                    <span class="s0"># unconditional</span>
+                    <span class="s1">include </span><span class="s4">= </span><span class="s3">True</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s3">if </span><span class="s5">'extra' </span><span class="s3">not in </span><span class="s1">d</span><span class="s4">:</span>
+                        <span class="s0"># Not extra-dependent - only environment-dependent</span>
+                        <span class="s1">include </span><span class="s4">= </span><span class="s3">True</span>
+                    <span class="s3">else</span><span class="s4">:</span>
+                        <span class="s1">include </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'extra'</span><span class="s4">) </span><span class="s3">in </span><span class="s1">extras</span>
+                    <span class="s3">if </span><span class="s1">include</span><span class="s4">:</span>
+                        <span class="s0"># Not excluded because of extras, check environment</span>
+                        <span class="s1">marker </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'environment'</span><span class="s4">)</span>
+                        <span class="s3">if </span><span class="s1">marker</span><span class="s4">:</span>
+                            <span class="s1">include </span><span class="s4">= </span><span class="s1">interpret</span><span class="s4">(</span><span class="s1">marker</span><span class="s4">, </span><span class="s1">env</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">include</span><span class="s4">:</span>
+                    <span class="s1">result</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">d</span><span class="s4">[</span><span class="s5">'requires'</span><span class="s4">])</span>
+            <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'build'</span><span class="s4">, </span><span class="s5">'dev'</span><span class="s4">, </span><span class="s5">'test'</span><span class="s4">):</span>
+                <span class="s1">e </span><span class="s4">= </span><span class="s5">':%s:' </span><span class="s4">% </span><span class="s1">key</span>
+                <span class="s3">if </span><span class="s1">e </span><span class="s3">in </span><span class="s1">extras</span><span class="s4">:</span>
+                    <span class="s1">extras</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">e</span><span class="s4">)</span>
+                    <span class="s0"># A recursive call, but it should terminate since 'test'</span>
+                    <span class="s0"># has been removed from the extras</span>
+                    <span class="s1">reqts </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'%s_requires' </span><span class="s4">% </span><span class="s1">key</span><span class="s4">, [])</span>
+                    <span class="s1">result</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">get_requirements</span><span class="s4">(</span><span class="s1">reqts</span><span class="s4">, </span><span class="s1">extras</span><span class="s4">=</span><span class="s1">extras</span><span class="s4">, </span><span class="s1">env</span><span class="s4">=</span><span class="s1">env</span><span class="s4">))</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">dictionary</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_from_legacy</span><span class="s4">()</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">dependencies</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">NotImplementedError</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">extract_by_key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">DEPENDENCY_KEYS</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">dependencies</span><span class="s4">.</span><span class="s1">setter</span>
+    <span class="s3">def </span><span class="s1">dependencies</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">NotImplementedError</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_validate_mapping</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">mapping</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">mapping</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'metadata_version'</span><span class="s4">) != </span><span class="s1">self</span><span class="s4">.</span><span class="s1">METADATA_VERSION</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">MetadataUnrecognizedVersionError</span><span class="s4">()</span>
+        <span class="s1">missing </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">exclusions </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">MANDATORY_KEYS</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">mapping</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">scheme </span><span class="s3">not in </span><span class="s1">exclusions</span><span class="s4">:</span>
+                    <span class="s1">missing</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">key</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">missing</span><span class="s4">:</span>
+            <span class="s1">msg </span><span class="s4">= </span><span class="s5">'Missing metadata items: %s' </span><span class="s4">% </span><span class="s5">', '</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">missing</span><span class="s4">)</span>
+            <span class="s3">raise </span><span class="s1">MetadataMissingError</span><span class="s4">(</span><span class="s1">msg</span><span class="s4">)</span>
+        <span class="s3">for </span><span class="s1">k</span><span class="s4">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">mapping</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_validate_value</span><span class="s4">(</span><span class="s1">k</span><span class="s4">, </span><span class="s1">v</span><span class="s4">, </span><span class="s1">scheme</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">validate</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">missing</span><span class="s4">, </span><span class="s1">warnings </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">check</span><span class="s4">(</span><span class="s3">True</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">missing </span><span class="s3">or </span><span class="s1">warnings</span><span class="s4">:</span>
+                <span class="s1">logger</span><span class="s4">.</span><span class="s1">warning</span><span class="s4">(</span><span class="s5">'Metadata: missing: %s, warnings: %s'</span><span class="s4">, </span><span class="s1">missing</span><span class="s4">, </span><span class="s1">warnings</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_validate_mapping</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">scheme</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">todict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">todict</span><span class="s4">(</span><span class="s3">True</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">result </span><span class="s4">= </span><span class="s1">extract_by_key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">INDEX_KEYS</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">_from_legacy</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">assert </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy </span><span class="s3">and not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span>
+        <span class="s1">result </span><span class="s4">= {</span>
+            <span class="s5">'metadata_version'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">METADATA_VERSION</span><span class="s4">,</span>
+            <span class="s5">'generator'</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">GENERATOR</span><span class="s4">,</span>
+        <span class="s4">}</span>
+        <span class="s1">lmd </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">todict</span><span class="s4">(</span><span class="s3">True</span><span class="s4">)  </span><span class="s0"># skip missing ones</span>
+        <span class="s3">for </span><span class="s1">k </span><span class="s3">in </span><span class="s4">(</span><span class="s5">'name'</span><span class="s4">, </span><span class="s5">'version'</span><span class="s4">, </span><span class="s5">'license'</span><span class="s4">, </span><span class="s5">'summary'</span><span class="s4">, </span><span class="s5">'description'</span><span class="s4">, </span><span class="s5">'classifier'</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">k </span><span class="s3">in </span><span class="s1">lmd</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">k </span><span class="s4">== </span><span class="s5">'classifier'</span><span class="s4">:</span>
+                    <span class="s1">nk </span><span class="s4">= </span><span class="s5">'classifiers'</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">nk </span><span class="s4">= </span><span class="s1">k</span>
+                <span class="s1">result</span><span class="s4">[</span><span class="s1">nk</span><span class="s4">] = </span><span class="s1">lmd</span><span class="s4">[</span><span class="s1">k</span><span class="s4">]</span>
+        <span class="s1">kw </span><span class="s4">= </span><span class="s1">lmd</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'Keywords'</span><span class="s4">, [])</span>
+        <span class="s3">if </span><span class="s1">kw </span><span class="s4">== [</span><span class="s5">''</span><span class="s4">]:</span>
+            <span class="s1">kw </span><span class="s4">= []</span>
+        <span class="s1">result</span><span class="s4">[</span><span class="s5">'keywords'</span><span class="s4">] = </span><span class="s1">kw</span>
+        <span class="s1">keys </span><span class="s4">= ((</span><span class="s5">'requires_dist'</span><span class="s4">, </span><span class="s5">'run_requires'</span><span class="s4">), (</span><span class="s5">'setup_requires_dist'</span><span class="s4">, </span><span class="s5">'build_requires'</span><span class="s4">))</span>
+        <span class="s3">for </span><span class="s1">ok</span><span class="s4">, </span><span class="s1">nk </span><span class="s3">in </span><span class="s1">keys</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">ok </span><span class="s3">in </span><span class="s1">lmd </span><span class="s3">and </span><span class="s1">lmd</span><span class="s4">[</span><span class="s1">ok</span><span class="s4">]:</span>
+                <span class="s1">result</span><span class="s4">[</span><span class="s1">nk</span><span class="s4">] = [{</span><span class="s5">'requires'</span><span class="s4">: </span><span class="s1">lmd</span><span class="s4">[</span><span class="s1">ok</span><span class="s4">]}]</span>
+        <span class="s1">result</span><span class="s4">[</span><span class="s5">'provides'</span><span class="s4">] = </span><span class="s1">self</span><span class="s4">.</span><span class="s1">provides</span>
+        <span class="s0"># author = {}</span>
+        <span class="s0"># maintainer = {}</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s1">LEGACY_MAPPING </span><span class="s4">= {</span>
+        <span class="s5">'name'</span><span class="s4">: </span><span class="s5">'Name'</span><span class="s4">,</span>
+        <span class="s5">'version'</span><span class="s4">: </span><span class="s5">'Version'</span><span class="s4">,</span>
+        <span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, </span><span class="s5">'python.details'</span><span class="s4">, </span><span class="s5">'license'</span><span class="s4">): </span><span class="s5">'License'</span><span class="s4">,</span>
+        <span class="s5">'summary'</span><span class="s4">: </span><span class="s5">'Summary'</span><span class="s4">,</span>
+        <span class="s5">'description'</span><span class="s4">: </span><span class="s5">'Description'</span><span class="s4">,</span>
+        <span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, </span><span class="s5">'python.project'</span><span class="s4">, </span><span class="s5">'project_urls'</span><span class="s4">, </span><span class="s5">'Home'</span><span class="s4">): </span><span class="s5">'Home-page'</span><span class="s4">,</span>
+        <span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, </span><span class="s5">'python.project'</span><span class="s4">, </span><span class="s5">'contacts'</span><span class="s4">, </span><span class="s6">0</span><span class="s4">, </span><span class="s5">'name'</span><span class="s4">): </span><span class="s5">'Author'</span><span class="s4">,</span>
+        <span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, </span><span class="s5">'python.project'</span><span class="s4">, </span><span class="s5">'contacts'</span><span class="s4">, </span><span class="s6">0</span><span class="s4">, </span><span class="s5">'email'</span><span class="s4">): </span><span class="s5">'Author-email'</span><span class="s4">,</span>
+        <span class="s5">'source_url'</span><span class="s4">: </span><span class="s5">'Download-URL'</span><span class="s4">,</span>
+        <span class="s4">(</span><span class="s5">'extensions'</span><span class="s4">, </span><span class="s5">'python.details'</span><span class="s4">, </span><span class="s5">'classifiers'</span><span class="s4">): </span><span class="s5">'Classifier'</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s3">def </span><span class="s1">_to_legacy</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+
+        <span class="s3">def </span><span class="s1">process_entries</span><span class="s4">(</span><span class="s1">entries</span><span class="s4">):</span>
+            <span class="s1">reqts </span><span class="s4">= </span><span class="s1">set</span><span class="s4">()</span>
+            <span class="s3">for </span><span class="s1">e </span><span class="s3">in </span><span class="s1">entries</span><span class="s4">:</span>
+                <span class="s1">extra </span><span class="s4">= </span><span class="s1">e</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'extra'</span><span class="s4">)</span>
+                <span class="s1">env </span><span class="s4">= </span><span class="s1">e</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">'environment'</span><span class="s4">)</span>
+                <span class="s1">rlist </span><span class="s4">= </span><span class="s1">e</span><span class="s4">[</span><span class="s5">'requires'</span><span class="s4">]</span>
+                <span class="s3">for </span><span class="s1">r </span><span class="s3">in </span><span class="s1">rlist</span><span class="s4">:</span>
+                    <span class="s3">if not </span><span class="s1">env </span><span class="s3">and not </span><span class="s1">extra</span><span class="s4">:</span>
+                        <span class="s1">reqts</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">r</span><span class="s4">)</span>
+                    <span class="s3">else</span><span class="s4">:</span>
+                        <span class="s1">marker </span><span class="s4">= </span><span class="s5">''</span>
+                        <span class="s3">if </span><span class="s1">extra</span><span class="s4">:</span>
+                            <span class="s1">marker </span><span class="s4">= </span><span class="s5">'extra == &quot;%s&quot;' </span><span class="s4">% </span><span class="s1">extra</span>
+                        <span class="s3">if </span><span class="s1">env</span><span class="s4">:</span>
+                            <span class="s3">if </span><span class="s1">marker</span><span class="s4">:</span>
+                                <span class="s1">marker </span><span class="s4">= </span><span class="s5">'(%s) and %s' </span><span class="s4">% (</span><span class="s1">env</span><span class="s4">, </span><span class="s1">marker</span><span class="s4">)</span>
+                            <span class="s3">else</span><span class="s4">:</span>
+                                <span class="s1">marker </span><span class="s4">= </span><span class="s1">env</span>
+                        <span class="s1">reqts</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s5">';'</span><span class="s4">.</span><span class="s1">join</span><span class="s4">((</span><span class="s1">r</span><span class="s4">, </span><span class="s1">marker</span><span class="s4">)))</span>
+            <span class="s3">return </span><span class="s1">reqts</span>
+
+        <span class="s3">assert </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s3">and not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">LegacyMetadata</span><span class="s4">()</span>
+        <span class="s1">nmd </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span>
+        <span class="s0"># import pdb; pdb.set_trace()</span>
+        <span class="s3">for </span><span class="s1">nk</span><span class="s4">, </span><span class="s1">ok </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">LEGACY_MAPPING</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">nk</span><span class="s4">, </span><span class="s1">tuple</span><span class="s4">):</span>
+                <span class="s3">if </span><span class="s1">nk </span><span class="s3">in </span><span class="s1">nmd</span><span class="s4">:</span>
+                    <span class="s1">result</span><span class="s4">[</span><span class="s1">ok</span><span class="s4">] = </span><span class="s1">nmd</span><span class="s4">[</span><span class="s1">nk</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">d </span><span class="s4">= </span><span class="s1">nmd</span>
+                <span class="s1">found </span><span class="s4">= </span><span class="s3">True</span>
+                <span class="s3">for </span><span class="s1">k </span><span class="s3">in </span><span class="s1">nk</span><span class="s4">:</span>
+                    <span class="s3">try</span><span class="s4">:</span>
+                        <span class="s1">d </span><span class="s4">= </span><span class="s1">d</span><span class="s4">[</span><span class="s1">k</span><span class="s4">]</span>
+                    <span class="s3">except </span><span class="s4">(</span><span class="s1">KeyError</span><span class="s4">, </span><span class="s1">IndexError</span><span class="s4">):</span>
+                        <span class="s1">found </span><span class="s4">= </span><span class="s3">False</span>
+                        <span class="s3">break</span>
+                <span class="s3">if </span><span class="s1">found</span><span class="s4">:</span>
+                    <span class="s1">result</span><span class="s4">[</span><span class="s1">ok</span><span class="s4">] = </span><span class="s1">d</span>
+        <span class="s1">r1 </span><span class="s4">= </span><span class="s1">process_entries</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">run_requires </span><span class="s4">+ </span><span class="s1">self</span><span class="s4">.</span><span class="s1">meta_requires</span><span class="s4">)</span>
+        <span class="s1">r2 </span><span class="s4">= </span><span class="s1">process_entries</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">build_requires </span><span class="s4">+ </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dev_requires</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">extras</span><span class="s4">:</span>
+            <span class="s1">result</span><span class="s4">[</span><span class="s5">'Provides-Extra'</span><span class="s4">] = </span><span class="s1">sorted</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">extras</span><span class="s4">)</span>
+        <span class="s1">result</span><span class="s4">[</span><span class="s5">'Requires-Dist'</span><span class="s4">] = </span><span class="s1">sorted</span><span class="s4">(</span><span class="s1">r1</span><span class="s4">)</span>
+        <span class="s1">result</span><span class="s4">[</span><span class="s5">'Setup-Requires-Dist'</span><span class="s4">] = </span><span class="s1">sorted</span><span class="s4">(</span><span class="s1">r2</span><span class="s4">)</span>
+        <span class="s0"># TODO: any other fields wanted</span>
+        <span class="s3">return </span><span class="s1">result</span>
+
+    <span class="s3">def </span><span class="s1">write</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">legacy</span><span class="s4">=</span><span class="s3">False</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">=</span><span class="s3">True</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s4">[</span><span class="s1">path</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">].</span><span class="s1">count</span><span class="s4">(</span><span class="s3">None</span><span class="s4">) != </span><span class="s6">1</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s5">'Exactly one of path and fileobj is needed'</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">validate</span><span class="s4">()</span>
+        <span class="s3">if </span><span class="s1">legacy</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+                <span class="s1">legacy_md </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">legacy_md </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_to_legacy</span><span class="s4">()</span>
+            <span class="s3">if </span><span class="s1">path</span><span class="s4">:</span>
+                <span class="s1">legacy_md</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">=</span><span class="s1">skip_unknown</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">legacy_md</span><span class="s4">.</span><span class="s1">write_file</span><span class="s4">(</span><span class="s1">fileobj</span><span class="s4">, </span><span class="s1">skip_unknown</span><span class="s4">=</span><span class="s1">skip_unknown</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+                <span class="s1">d </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_from_legacy</span><span class="s4">()</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">d </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span>
+            <span class="s3">if </span><span class="s1">fileobj</span><span class="s4">:</span>
+                <span class="s1">json</span><span class="s4">.</span><span class="s1">dump</span><span class="s4">(</span><span class="s1">d</span><span class="s4">, </span><span class="s1">fileobj</span><span class="s4">, </span><span class="s1">ensure_ascii</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">indent</span><span class="s4">=</span><span class="s6">2</span><span class="s4">, </span><span class="s1">sort_keys</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">with </span><span class="s1">codecs</span><span class="s4">.</span><span class="s1">open</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s5">'w'</span><span class="s4">, </span><span class="s5">'utf-8'</span><span class="s4">) </span><span class="s3">as </span><span class="s1">f</span><span class="s4">:</span>
+                    <span class="s1">json</span><span class="s4">.</span><span class="s1">dump</span><span class="s4">(</span><span class="s1">d</span><span class="s4">, </span><span class="s1">f</span><span class="s4">, </span><span class="s1">ensure_ascii</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">indent</span><span class="s4">=</span><span class="s6">2</span><span class="s4">, </span><span class="s1">sort_keys</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">add_requirements</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">requirements</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_legacy</span><span class="s4">.</span><span class="s1">add_requirements</span><span class="s4">(</span><span class="s1">requirements</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">run_requires </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s5">'run_requires'</span><span class="s4">, [])</span>
+            <span class="s1">always </span><span class="s4">= </span><span class="s3">None</span>
+            <span class="s3">for </span><span class="s1">entry </span><span class="s3">in </span><span class="s1">run_requires</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s5">'environment' </span><span class="s3">not in </span><span class="s1">entry </span><span class="s3">and </span><span class="s5">'extra' </span><span class="s3">not in </span><span class="s1">entry</span><span class="s4">:</span>
+                    <span class="s1">always </span><span class="s4">= </span><span class="s1">entry</span>
+                    <span class="s3">break</span>
+            <span class="s3">if </span><span class="s1">always </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">always </span><span class="s4">= {</span><span class="s5">'requires'</span><span class="s4">: </span><span class="s1">requirements</span><span class="s4">}</span>
+                <span class="s1">run_requires</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s6">0</span><span class="s4">, </span><span class="s1">always</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">rset </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">always</span><span class="s4">[</span><span class="s5">'requires'</span><span class="s4">]) | </span><span class="s1">set</span><span class="s4">(</span><span class="s1">requirements</span><span class="s4">)</span>
+                <span class="s1">always</span><span class="s4">[</span><span class="s5">'requires'</span><span class="s4">] = </span><span class="s1">sorted</span><span class="s4">(</span><span class="s1">rset</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">name </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">name </span><span class="s3">or </span><span class="s5">'(no name)'</span>
+        <span class="s1">version </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">version </span><span class="s3">or </span><span class="s5">'no version'</span>
+        <span class="s3">return </span><span class="s5">'&lt;%s %s %s (%s)&gt;' </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">metadata_version</span><span class="s4">, </span><span class="s1">name</span><span class="s4">, </span><span class="s1">version</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<html>
+<head>
+<title>main.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+main.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">connectors</span><span class="s2">.</span><span class="s1">gpt_gateway_connector </span><span class="s0">import </span><span class="s1">GPTGatewayConnector</span>
+<span class="s0">from </span><span class="s1">connectors</span><span class="s2">.</span><span class="s1">db_connector </span><span class="s0">import </span><span class="s1">DBConnector</span>
+<span class="s0">from </span><span class="s1">connectors</span><span class="s2">.</span><span class="s1">spreadsheet_connector </span><span class="s0">import </span><span class="s1">SpreadsheetConnector</span>
+<span class="s0">from </span><span class="s1">tokenizer</span><span class="s2">.</span><span class="s1">text_tokenizer </span><span class="s0">import </span><span class="s1">TextTokenizer</span>
+<span class="s0">from </span><span class="s1">tokenizer</span><span class="s2">.</span><span class="s1">image_tokenizer </span><span class="s0">import </span><span class="s1">ImageTokenizer</span>
+
+<span class="s0">def </span><span class="s1">main</span><span class="s2">():</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Entry point for the QE-GenAI framework. Demonstrates how to: 
+    1. Connect to GPT via Azure API Gateway 
+    2. Connect to a database 
+    3. Use tokenizer for text and image data 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;=== QE-GenAI Framework Starting ===&quot;</span><span class="s2">)</span>
+
+    <span class="s5"># -----------------------------</span>
+    <span class="s5"># Initialize and Use Connectors</span>
+    <span class="s5"># -----------------------------</span>
+
+    <span class="s5"># 1. GPT Gateway Connector Example</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">--- Connecting to GPT API ---&quot;</span><span class="s2">)</span>
+    <span class="s1">gpt_connector </span><span class="s2">= </span><span class="s1">GPTGatewayConnector</span><span class="s2">(</span>
+        <span class="s1">api_base</span><span class="s2">=</span><span class="s4">&quot;https://your-azure-endpoint&quot;</span><span class="s2">,</span>
+        <span class="s1">api_key</span><span class="s2">=</span><span class="s4">&quot;your-azure-api-key&quot;</span><span class="s2">,</span>
+        <span class="s1">deployment_name</span><span class="s2">=</span><span class="s4">&quot;gpt-deployment&quot;</span>
+    <span class="s2">)</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">gpt_connector</span><span class="s2">.</span><span class="s1">connect</span><span class="s2">()</span>
+        <span class="s1">response </span><span class="s2">= </span><span class="s1">gpt_connector</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s1">prompt</span><span class="s2">=</span><span class="s4">&quot;Explain AI in simple terms.&quot;</span><span class="s2">, </span><span class="s1">max_tokens</span><span class="s2">=</span><span class="s6">50</span><span class="s2">)</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;GPT Response:&quot;</span><span class="s2">, </span><span class="s1">response</span><span class="s2">[</span><span class="s4">&quot;choices&quot;</span><span class="s2">][</span><span class="s6">0</span><span class="s2">][</span><span class="s4">&quot;message&quot;</span><span class="s2">][</span><span class="s4">&quot;content&quot;</span><span class="s2">])</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s1">gpt_connector</span><span class="s2">.</span><span class="s1">disconnect</span><span class="s2">()</span>
+
+    <span class="s5"># 2. Database Connector Example</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">--- Connecting to Database ---&quot;</span><span class="s2">)</span>
+    <span class="s1">db_connector </span><span class="s2">= </span><span class="s1">DBConnector</span><span class="s2">(</span><span class="s1">db_url</span><span class="s2">=</span><span class="s4">&quot;sqlite:///example.db&quot;</span><span class="s2">)</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">db_connector</span><span class="s2">.</span><span class="s1">connect</span><span class="s2">()</span>
+        <span class="s1">rows </span><span class="s2">= </span><span class="s1">db_connector</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s4">&quot;SELECT 'Hello from DB!' AS message&quot;</span><span class="s2">)</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;Database Response:&quot;</span><span class="s2">, </span><span class="s1">rows</span><span class="s2">[</span><span class="s6">0</span><span class="s2">][</span><span class="s6">0</span><span class="s2">])</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s1">db_connector</span><span class="s2">.</span><span class="s1">disconnect</span><span class="s2">()</span>
+
+    <span class="s5"># 3. Spreadsheet Connector Example</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">--- Working with Spreadsheet ---&quot;</span><span class="s2">)</span>
+    <span class="s1">spreadsheet_connector </span><span class="s2">= </span><span class="s1">SpreadsheetConnector</span><span class="s2">(</span><span class="s1">file_path</span><span class="s2">=</span><span class="s4">&quot;example.xlsx&quot;</span><span class="s2">)</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">spreadsheet_connector</span><span class="s2">.</span><span class="s1">connect</span><span class="s2">()</span>
+        <span class="s1">sheet_data </span><span class="s2">= </span><span class="s1">spreadsheet_connector</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(</span><span class="s1">sheet_name</span><span class="s2">=</span><span class="s4">&quot;Sheet1&quot;</span><span class="s2">, </span><span class="s1">operation</span><span class="s2">=</span><span class="s4">&quot;read&quot;</span><span class="s2">)</span>
+        <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;Spreadsheet Data:&quot;</span><span class="s2">, </span><span class="s1">sheet_data</span><span class="s2">)</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s1">spreadsheet_connector</span><span class="s2">.</span><span class="s1">disconnect</span><span class="s2">()</span>
+
+    <span class="s5"># -----------------------------</span>
+    <span class="s5"># Initialize and Use Tokenizers</span>
+    <span class="s5"># -----------------------------</span>
+
+    <span class="s5"># 4. Text Tokenizer Example</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">--- Tokenizing Text Data ---&quot;</span><span class="s2">)</span>
+    <span class="s1">text_data </span><span class="s2">= </span><span class="s4">&quot;LangChain makes building GenAI apps easy and modular.&quot;</span>
+    <span class="s1">text_tokenizer </span><span class="s2">= </span><span class="s1">TextTokenizer</span><span class="s2">(</span><span class="s1">chunk_size</span><span class="s2">=</span><span class="s6">10</span><span class="s2">, </span><span class="s1">chunk_overlap</span><span class="s2">=</span><span class="s6">0</span><span class="s2">)</span>
+    <span class="s1">text_tokens </span><span class="s2">= </span><span class="s1">text_tokenizer</span><span class="s2">.</span><span class="s1">tokenize</span><span class="s2">(</span><span class="s1">text_data</span><span class="s2">)</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;Text Tokens:&quot;</span><span class="s2">, </span><span class="s1">text_tokens</span><span class="s2">)</span>
+
+    <span class="s5"># 5. Image Tokenizer Example</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">--- Tokenizing Image Data ---&quot;</span><span class="s2">)</span>
+    <span class="s1">image_path </span><span class="s2">= </span><span class="s4">&quot;path/to/image.jpg&quot;  </span><span class="s5"># Replace with an actual image path</span>
+    <span class="s1">image_tokenizer </span><span class="s2">= </span><span class="s1">ImageTokenizer</span><span class="s2">()</span>
+    <span class="s1">image_embeddings </span><span class="s2">= </span><span class="s1">image_tokenizer</span><span class="s2">.</span><span class="s1">tokenize</span><span class="s2">(</span><span class="s1">image_path</span><span class="s2">)</span>
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;Image Embeddings:&quot;</span><span class="s2">, </span><span class="s1">image_embeddings</span><span class="s2">)</span>
+
+    <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">=== QE-GenAI Framework Completed Successfully ===&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">&quot;__main__&quot;</span><span class="s2">:</span>
+    <span class="s1">main</span><span class="s2">()</span></pre>
+</body>
+</html>

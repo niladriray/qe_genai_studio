@@ -1,0 +1,92 @@
+<html>
+<head>
+<title>activate</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activate</font>
+</center></td></tr></table>
+<pre><span class="s0"># This file must be used with &quot;source bin/activate&quot; *from bash*</span>
+<span class="s0"># You cannot run it directly</span>
+
+<span class="s0">deactivate () {</span>
+    <span class="s0"># reset old environment variables</span>
+    <span class="s0">if [ -n &quot;${_OLD_VIRTUAL_PATH:-}&quot; ] ; then</span>
+        <span class="s0">PATH=&quot;${_OLD_VIRTUAL_PATH:-}&quot;</span>
+        <span class="s0">export PATH</span>
+        <span class="s0">unset _OLD_VIRTUAL_PATH</span>
+    <span class="s0">fi</span>
+    <span class="s0">if [ -n &quot;${_OLD_VIRTUAL_PYTHONHOME:-}&quot; ] ; then</span>
+        <span class="s0">PYTHONHOME=&quot;${_OLD_VIRTUAL_PYTHONHOME:-}&quot;</span>
+        <span class="s0">export PYTHONHOME</span>
+        <span class="s0">unset _OLD_VIRTUAL_PYTHONHOME</span>
+    <span class="s0">fi</span>
+
+    <span class="s0"># Call hash to forget past commands. Without forgetting</span>
+    <span class="s0"># past commands the $PATH changes we made may not be respected</span>
+    <span class="s0">hash -r 2&gt; /dev/null</span>
+
+    <span class="s0">if [ -n &quot;${_OLD_VIRTUAL_PS1:-}&quot; ] ; then</span>
+        <span class="s0">PS1=&quot;${_OLD_VIRTUAL_PS1:-}&quot;</span>
+        <span class="s0">export PS1</span>
+        <span class="s0">unset _OLD_VIRTUAL_PS1</span>
+    <span class="s0">fi</span>
+
+    <span class="s0">unset VIRTUAL_ENV</span>
+    <span class="s0">unset VIRTUAL_ENV_PROMPT</span>
+    <span class="s0">if [ ! &quot;${1:-}&quot; = &quot;nondestructive&quot; ] ; then</span>
+    <span class="s0"># Self destruct!</span>
+        <span class="s0">unset -f deactivate</span>
+    <span class="s0">fi</span>
+<span class="s0">}</span>
+
+<span class="s0"># unset irrelevant variables</span>
+<span class="s0">deactivate nondestructive</span>
+
+<span class="s0"># on Windows, a path can contain colons and backslashes and has to be converted:</span>
+<span class="s0">case &quot;$(uname)&quot; in</span>
+    <span class="s0">CYGWIN*|MSYS*)</span>
+        <span class="s0"># transform D:\path\to\venv to /d/path/to/venv on MSYS</span>
+        <span class="s0"># and to /cygdrive/d/path/to/venv on Cygwin</span>
+        <span class="s0">VIRTUAL_ENV=$(cygpath &quot;/Users/niladriray/PycharmProjects/PNCGenAI/.venv&quot;)</span>
+        <span class="s0">export VIRTUAL_ENV</span>
+        <span class="s0">;;</span>
+    <span class="s0">*)</span>
+        <span class="s0"># use the path as-is</span>
+        <span class="s0">export VIRTUAL_ENV=&quot;/Users/niladriray/PycharmProjects/PNCGenAI/.venv&quot;</span>
+        <span class="s0">;;</span>
+<span class="s0">esac</span>
+
+<span class="s0">_OLD_VIRTUAL_PATH=&quot;$PATH&quot;</span>
+<span class="s0">PATH=&quot;$VIRTUAL_ENV/bin:$PATH&quot;</span>
+<span class="s0">export PATH</span>
+
+<span class="s0">VIRTUAL_ENV_PROMPT=&quot;.venv&quot;</span>
+<span class="s0">export VIRTUAL_ENV_PROMPT</span>
+
+<span class="s0"># unset PYTHONHOME if set</span>
+<span class="s0"># this will fail if PYTHONHOME is set to the empty string (which is bad anyway)</span>
+<span class="s0"># could use `if (set -u; : $PYTHONHOME) ;` in bash</span>
+<span class="s0">if [ -n &quot;${PYTHONHOME:-}&quot; ] ; then</span>
+    <span class="s0">_OLD_VIRTUAL_PYTHONHOME=&quot;${PYTHONHOME:-}&quot;</span>
+    <span class="s0">unset PYTHONHOME</span>
+<span class="s0">fi</span>
+
+<span class="s0">if [ -z &quot;${VIRTUAL_ENV_DISABLE_PROMPT:-}&quot; ] ; then</span>
+    <span class="s0">_OLD_VIRTUAL_PS1=&quot;${PS1:-}&quot;</span>
+    <span class="s0">PS1=&quot;(.venv) ${PS1:-}&quot;</span>
+    <span class="s0">export PS1</span>
+<span class="s0">fi</span>
+
+<span class="s0"># Call hash to forget past commands. Without forgetting</span>
+<span class="s0"># past commands the $PATH changes we made may not be respected</span>
+<span class="s0">hash -r 2&gt; /dev/null</span>
+</pre>
+</body>
+</html>

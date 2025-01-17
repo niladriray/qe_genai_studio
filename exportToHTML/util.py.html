@@ -1,0 +1,347 @@
+<html>
+<head>
+<title>util.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+util.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+    pygments.util 
+    ~~~~~~~~~~~~~ 
+ 
+    Utility functions. 
+ 
+    :copyright: Copyright 2006-2024 by the Pygments team, see AUTHORS. 
+    :license: BSD, see LICENSE for details. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">TextIOWrapper</span>
+
+
+<span class="s1">split_path_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'[/\\ ]'</span><span class="s3">)</span>
+<span class="s1">doctype_lookup_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r''' 
+    &lt;!DOCTYPE\s+( 
+     [a-zA-Z_][a-zA-Z0-9]* 
+     (?: \s+      # optional in HTML5 
+     [a-zA-Z_][a-zA-Z0-9]*\s+ 
+     &quot;[^&quot;]*&quot;)? 
+     ) 
+     [^&gt;]*&gt; 
+'''</span><span class="s3">, </span><span class="s1">re</span><span class="s3">.</span><span class="s1">DOTALL </span><span class="s3">| </span><span class="s1">re</span><span class="s3">.</span><span class="s1">MULTILINE </span><span class="s3">| </span><span class="s1">re</span><span class="s3">.</span><span class="s1">VERBOSE</span><span class="s3">)</span>
+<span class="s1">tag_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'&lt;(.+?)(\s.*?)?&gt;.*?&lt;/.+?&gt;'</span><span class="s3">,</span>
+                    <span class="s1">re</span><span class="s3">.</span><span class="s1">IGNORECASE </span><span class="s3">| </span><span class="s1">re</span><span class="s3">.</span><span class="s1">DOTALL </span><span class="s3">| </span><span class="s1">re</span><span class="s3">.</span><span class="s1">MULTILINE</span><span class="s3">)</span>
+<span class="s1">xml_decl_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r'\s*&lt;\?xml[^&gt;]*\?&gt;'</span><span class="s3">, </span><span class="s1">re</span><span class="s3">.</span><span class="s1">I</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">ClassNotFound</span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Raised if one of the lookup functions didn't find a matching class.&quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s1">Exception</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    This exception will be raised by all option processing functions if 
+    the type or value of the argument is not correct. 
+    &quot;&quot;&quot;</span>
+
+<span class="s2">def </span><span class="s1">get_choice_opt</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s1">optname</span><span class="s3">, </span><span class="s1">allowed</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">normcase</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If the key `optname` from the dictionary is not in the sequence 
+    `allowed`, raise an error, otherwise return it. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">string </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">normcase</span><span class="s3">:</span>
+        <span class="s1">string </span><span class="s3">= </span><span class="s1">string</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">()</span>
+    <span class="s2">if </span><span class="s1">string </span><span class="s2">not in </span><span class="s1">allowed</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">'Value for option {} must be one of {}'</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">optname</span><span class="s3">, </span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">map</span><span class="s3">(</span><span class="s1">str</span><span class="s3">, </span><span class="s1">allowed</span><span class="s3">))))</span>
+    <span class="s2">return </span><span class="s1">string</span>
+
+
+<span class="s2">def </span><span class="s1">get_bool_opt</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Intuitively, this is `options.get(optname, default)`, but restricted to 
+    Boolean value. The Booleans can be represented as string, in order to accept 
+    Boolean value from the command line arguments. If the key `optname` is 
+    present in the dictionary `options` and is not associated with a Boolean, 
+    raise an `OptionError`. If it is absent, `default` is returned instead. 
+ 
+    The valid string values for ``True`` are ``1``, ``yes``, ``true`` and 
+    ``on``, the ones for ``False`` are ``0``, ``no``, ``false`` and ``off`` 
+    (matched case-insensitively). 
+    &quot;&quot;&quot;</span>
+    <span class="s1">string </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">string</span><span class="s3">, </span><span class="s1">bool</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">string</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">string</span><span class="s3">, </span><span class="s1">int</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">bool</span><span class="s3">(</span><span class="s1">string</span><span class="s3">)</span>
+    <span class="s2">elif not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">string</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">f'Invalid type </span><span class="s2">{</span><span class="s1">string</span><span class="s2">!r} </span><span class="s4">for option </span><span class="s2">{</span><span class="s1">optname</span><span class="s2">}</span><span class="s4">; use '</span>
+                          <span class="s4">'1/0, yes/no, true/false, on/off'</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">string</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'1'</span><span class="s3">, </span><span class="s4">'yes'</span><span class="s3">, </span><span class="s4">'true'</span><span class="s3">, </span><span class="s4">'on'</span><span class="s3">):</span>
+        <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">string</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'0'</span><span class="s3">, </span><span class="s4">'no'</span><span class="s3">, </span><span class="s4">'false'</span><span class="s3">, </span><span class="s4">'off'</span><span class="s3">):</span>
+        <span class="s2">return False</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">f'Invalid value </span><span class="s2">{</span><span class="s1">string</span><span class="s2">!r} </span><span class="s4">for option </span><span class="s2">{</span><span class="s1">optname</span><span class="s2">}</span><span class="s4">; use '</span>
+                          <span class="s4">'1/0, yes/no, true/false, on/off'</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">get_int_opt</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;As :func:`get_bool_opt`, but interpret the value as an integer.&quot;&quot;&quot;</span>
+    <span class="s1">string </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">)</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">int</span><span class="s3">(</span><span class="s1">string</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">TypeError</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">f'Invalid type </span><span class="s2">{</span><span class="s1">string</span><span class="s2">!r} </span><span class="s4">for option </span><span class="s2">{</span><span class="s1">optname</span><span class="s2">}</span><span class="s4">; you '</span>
+                          <span class="s4">'must give an integer value'</span><span class="s3">)</span>
+    <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">f'Invalid value </span><span class="s2">{</span><span class="s1">string</span><span class="s2">!r} </span><span class="s4">for option </span><span class="s2">{</span><span class="s1">optname</span><span class="s2">}</span><span class="s4">; you '</span>
+                          <span class="s4">'must give an integer value'</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">get_list_opt</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    If the key `optname` from the dictionary `options` is a string, 
+    split it at whitespace and return it. If it is already a list 
+    or a tuple, it is returned as a list. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">val </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">optname</span><span class="s3">, </span><span class="s1">default</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">val</span><span class="s3">.</span><span class="s1">split</span><span class="s3">()</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">val</span><span class="s3">, (</span><span class="s1">list</span><span class="s3">, </span><span class="s1">tuple</span><span class="s3">)):</span>
+        <span class="s2">return </span><span class="s1">list</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">raise </span><span class="s1">OptionError</span><span class="s3">(</span><span class="s4">f'Invalid type </span><span class="s2">{</span><span class="s1">val</span><span class="s2">!r} </span><span class="s4">for option </span><span class="s2">{</span><span class="s1">optname</span><span class="s2">}</span><span class="s4">; you '</span>
+                          <span class="s4">'must give a list value'</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">docstring_headline</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">):</span>
+    <span class="s2">if not </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">__doc__</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s4">''</span>
+    <span class="s1">res </span><span class="s3">= []</span>
+    <span class="s2">for </span><span class="s1">line </span><span class="s2">in </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">__doc__</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">().</span><span class="s1">splitlines</span><span class="s3">():</span>
+        <span class="s2">if </span><span class="s1">line</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">():</span>
+            <span class="s1">res</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">&quot; &quot; </span><span class="s3">+ </span><span class="s1">line</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">())</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">break</span>
+    <span class="s2">return </span><span class="s4">''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">res</span><span class="s3">).</span><span class="s1">lstrip</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">make_analysator</span><span class="s3">(</span><span class="s1">f</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Return a static text analyser function that returns float values.&quot;&quot;&quot;</span>
+    <span class="s2">def </span><span class="s1">text_analyse</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">rv </span><span class="s3">= </span><span class="s1">f</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">Exception</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s5">0.0</span>
+        <span class="s2">if not </span><span class="s1">rv</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s5">0.0</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">min</span><span class="s3">(</span><span class="s5">1.0</span><span class="s3">, </span><span class="s1">max</span><span class="s3">(</span><span class="s5">0.0</span><span class="s3">, </span><span class="s1">float</span><span class="s3">(</span><span class="s1">rv</span><span class="s3">)))</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">ValueError</span><span class="s3">, </span><span class="s1">TypeError</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s5">0.0</span>
+    <span class="s1">text_analyse</span><span class="s3">.</span><span class="s1">__doc__ </span><span class="s3">= </span><span class="s1">f</span><span class="s3">.</span><span class="s1">__doc__</span>
+    <span class="s2">return </span><span class="s1">staticmethod</span><span class="s3">(</span><span class="s1">text_analyse</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">shebang_matches</span><span class="s3">(</span><span class="s1">text</span><span class="s3">, </span><span class="s1">regex</span><span class="s3">):</span>
+    <span class="s0">r&quot;&quot;&quot;Check if the given regular expression matches the last part of the 
+    shebang if one exists. 
+ 
+        &gt;&gt;&gt; from pygments.util import shebang_matches 
+        &gt;&gt;&gt; shebang_matches('#!/usr/bin/env python', r'python(2\.\d)?') 
+        True 
+        &gt;&gt;&gt; shebang_matches('#!/usr/bin/python2.4', r'python(2\.\d)?') 
+        True 
+        &gt;&gt;&gt; shebang_matches('#!/usr/bin/python-ruby', r'python(2\.\d)?') 
+        False 
+        &gt;&gt;&gt; shebang_matches('#!/usr/bin/python/ruby', r'python(2\.\d)?') 
+        False 
+        &gt;&gt;&gt; shebang_matches('#!/usr/bin/startsomethingwith python', 
+        ...                 r'python(2\.\d)?') 
+        True 
+ 
+    It also checks for common windows executable file extensions:: 
+ 
+        &gt;&gt;&gt; shebang_matches('#!C:\\Python2.4\\Python.exe', r'python(2\.\d)?') 
+        True 
+ 
+    Parameters (``'-f'`` or ``'--foo'`` are ignored so ``'perl'`` does 
+    the same as ``'perl -e'``) 
+ 
+    Note that this method automatically searches the whole string (eg: 
+    the regular expression is wrapped in ``'^$'``) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">index </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">find</span><span class="s3">(</span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">index </span><span class="s3">&gt;= </span><span class="s5">0</span><span class="s3">:</span>
+        <span class="s1">first_line </span><span class="s3">= </span><span class="s1">text</span><span class="s3">[:</span><span class="s1">index</span><span class="s3">].</span><span class="s1">lower</span><span class="s3">()</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">first_line </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">()</span>
+    <span class="s2">if </span><span class="s1">first_line</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">'#!'</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">found </span><span class="s3">= [</span><span class="s1">x </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">split_path_re</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s1">first_line</span><span class="s3">[</span><span class="s5">2</span><span class="s3">:].</span><span class="s1">strip</span><span class="s3">())</span>
+                     <span class="s2">if </span><span class="s1">x </span><span class="s2">and not </span><span class="s1">x</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s4">'-'</span><span class="s3">)][-</span><span class="s5">1</span><span class="s3">]</span>
+        <span class="s2">except </span><span class="s1">IndexError</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s1">regex </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">rf'^</span><span class="s2">{</span><span class="s1">regex</span><span class="s2">}</span><span class="s4">(\.(exe|cmd|bat|bin))?$'</span><span class="s3">, </span><span class="s1">re</span><span class="s3">.</span><span class="s1">IGNORECASE</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">regex</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">found</span><span class="s3">) </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">return False</span>
+
+
+<span class="s2">def </span><span class="s1">doctype_matches</span><span class="s3">(</span><span class="s1">text</span><span class="s3">, </span><span class="s1">regex</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Check if the doctype matches a regular expression (if present). 
+ 
+    Note that this method only checks the first part of a DOCTYPE. 
+    eg: 'html PUBLIC &quot;-//W3C//DTD XHTML 1.0 Strict//EN&quot;' 
+    &quot;&quot;&quot;</span>
+    <span class="s1">m </span><span class="s3">= </span><span class="s1">doctype_lookup_re</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">m </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">return False</span>
+    <span class="s1">doctype </span><span class="s3">= </span><span class="s1">m</span><span class="s3">.</span><span class="s1">group</span><span class="s3">(</span><span class="s5">1</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s1">regex</span><span class="s3">, </span><span class="s1">re</span><span class="s3">.</span><span class="s1">I</span><span class="s3">).</span><span class="s1">match</span><span class="s3">(</span><span class="s1">doctype</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">()) </span><span class="s2">is not None</span>
+
+
+<span class="s2">def </span><span class="s1">html_doctype_matches</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Check if the file looks like it has a html doctype.&quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">doctype_matches</span><span class="s3">(</span><span class="s1">text</span><span class="s3">, </span><span class="s4">r'html'</span><span class="s3">)</span>
+
+
+<span class="s1">_looks_like_xml_cache </span><span class="s3">= {}</span>
+
+
+<span class="s2">def </span><span class="s1">looks_like_xml</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Check if a doctype exists or if we have some tags.&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">xml_decl_re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+        <span class="s2">return True</span>
+    <span class="s1">key </span><span class="s3">= </span><span class="s1">hash</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">_looks_like_xml_cache</span><span class="s3">[</span><span class="s1">key</span><span class="s3">]</span>
+    <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+        <span class="s1">m </span><span class="s3">= </span><span class="s1">doctype_lookup_re</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">m </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return True</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">tag_re</span><span class="s3">.</span><span class="s1">search</span><span class="s3">(</span><span class="s1">text</span><span class="s3">[:</span><span class="s5">1000</span><span class="s3">]) </span><span class="s2">is not None</span>
+        <span class="s1">_looks_like_xml_cache</span><span class="s3">[</span><span class="s1">key</span><span class="s3">] = </span><span class="s1">rv</span>
+        <span class="s2">return </span><span class="s1">rv</span>
+
+
+<span class="s2">def </span><span class="s1">surrogatepair</span><span class="s3">(</span><span class="s1">c</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Given a unicode character code with length greater than 16 bits, 
+    return the two 16 bit surrogate pair. 
+    &quot;&quot;&quot;</span>
+    <span class="s6"># From example D28 of:</span>
+    <span class="s6"># http://www.unicode.org/book/ch03.pdf</span>
+    <span class="s2">return </span><span class="s3">(</span><span class="s5">0xd7c0 </span><span class="s3">+ (</span><span class="s1">c </span><span class="s3">&gt;&gt; </span><span class="s5">10</span><span class="s3">), (</span><span class="s5">0xdc00 </span><span class="s3">+ (</span><span class="s1">c </span><span class="s3">&amp; </span><span class="s5">0x3ff</span><span class="s3">)))</span>
+
+
+<span class="s2">def </span><span class="s1">format_lines</span><span class="s3">(</span><span class="s1">var_name</span><span class="s3">, </span><span class="s1">seq</span><span class="s3">, </span><span class="s1">raw</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">indent_level</span><span class="s3">=</span><span class="s5">0</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Formats a sequence of strings for output.&quot;&quot;&quot;</span>
+    <span class="s1">lines </span><span class="s3">= []</span>
+    <span class="s1">base_indent </span><span class="s3">= </span><span class="s4">' ' </span><span class="s3">* </span><span class="s1">indent_level </span><span class="s3">* </span><span class="s5">4</span>
+    <span class="s1">inner_indent </span><span class="s3">= </span><span class="s4">' ' </span><span class="s3">* (</span><span class="s1">indent_level </span><span class="s3">+ </span><span class="s5">1</span><span class="s3">) * </span><span class="s5">4</span>
+    <span class="s1">lines</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">base_indent </span><span class="s3">+ </span><span class="s1">var_name </span><span class="s3">+ </span><span class="s4">' = ('</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">raw</span><span class="s3">:</span>
+        <span class="s6"># These should be preformatted reprs of, say, tuples.</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">seq</span><span class="s3">:</span>
+            <span class="s1">lines</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">inner_indent </span><span class="s3">+ </span><span class="s1">i </span><span class="s3">+ </span><span class="s4">','</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">seq</span><span class="s3">:</span>
+            <span class="s6"># Force use of single quotes</span>
+            <span class="s1">r </span><span class="s3">= </span><span class="s1">repr</span><span class="s3">(</span><span class="s1">i </span><span class="s3">+ </span><span class="s4">'&quot;'</span><span class="s3">)</span>
+            <span class="s1">lines</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">inner_indent </span><span class="s3">+ </span><span class="s1">r</span><span class="s3">[:-</span><span class="s5">2</span><span class="s3">] + </span><span class="s1">r</span><span class="s3">[-</span><span class="s5">1</span><span class="s3">] + </span><span class="s4">','</span><span class="s3">)</span>
+    <span class="s1">lines</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">base_indent </span><span class="s3">+ </span><span class="s4">')'</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">lines</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">duplicates_removed</span><span class="s3">(</span><span class="s1">it</span><span class="s3">, </span><span class="s1">already_seen</span><span class="s3">=()):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Returns a list with duplicates removed from the iterable `it`. 
+ 
+    Order is preserved. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">lst </span><span class="s3">= []</span>
+    <span class="s1">seen </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">it</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">i </span><span class="s2">in </span><span class="s1">seen </span><span class="s2">or </span><span class="s1">i </span><span class="s2">in </span><span class="s1">already_seen</span><span class="s3">:</span>
+            <span class="s2">continue</span>
+        <span class="s1">lst</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+        <span class="s1">seen</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">i</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">lst</span>
+
+
+<span class="s2">class </span><span class="s1">Future</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Generic class to defer some work. 
+ 
+    Handled specially in RegexLexerMeta, to support regex string construction at 
+    first use. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">def </span><span class="s1">get</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+
+<span class="s2">def </span><span class="s1">guess_decode</span><span class="s3">(</span><span class="s1">text</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Decode *text* with guessed encoding. 
+ 
+    First try UTF-8; this should fail for non-UTF-8 encodings. 
+    Then try the preferred locale encoding. 
+    Fall back to latin-1, which always works. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">text </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s4">'utf-8'</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">text</span><span class="s3">, </span><span class="s4">'utf-8'</span>
+    <span class="s2">except </span><span class="s1">UnicodeDecodeError</span><span class="s3">:</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">import </span><span class="s1">locale</span>
+            <span class="s1">prefencoding </span><span class="s3">= </span><span class="s1">locale</span><span class="s3">.</span><span class="s1">getpreferredencoding</span><span class="s3">()</span>
+            <span class="s1">text </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">()</span>
+            <span class="s2">return </span><span class="s1">text</span><span class="s3">, </span><span class="s1">prefencoding</span>
+        <span class="s2">except </span><span class="s3">(</span><span class="s1">UnicodeDecodeError</span><span class="s3">, </span><span class="s1">LookupError</span><span class="s3">):</span>
+            <span class="s1">text </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s4">'latin1'</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">text</span><span class="s3">, </span><span class="s4">'latin1'</span>
+
+
+<span class="s2">def </span><span class="s1">guess_decode_from_terminal</span><span class="s3">(</span><span class="s1">text</span><span class="s3">, </span><span class="s1">term</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Decode *text* coming from terminal *term*. 
+ 
+    First try the terminal encoding, if given. 
+    Then try UTF-8.  Then try the preferred locale encoding. 
+    Fall back to latin-1, which always works. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">term</span><span class="s3">, </span><span class="s4">'encoding'</span><span class="s3">, </span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">text </span><span class="s3">= </span><span class="s1">text</span><span class="s3">.</span><span class="s1">decode</span><span class="s3">(</span><span class="s1">term</span><span class="s3">.</span><span class="s1">encoding</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">UnicodeDecodeError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">text</span><span class="s3">, </span><span class="s1">term</span><span class="s3">.</span><span class="s1">encoding</span>
+    <span class="s2">return </span><span class="s1">guess_decode</span><span class="s3">(</span><span class="s1">text</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">terminal_encoding</span><span class="s3">(</span><span class="s1">term</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Return our best guess of encoding for the given *term*.&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">term</span><span class="s3">, </span><span class="s4">'encoding'</span><span class="s3">, </span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">term</span><span class="s3">.</span><span class="s1">encoding</span>
+    <span class="s2">import </span><span class="s1">locale</span>
+    <span class="s2">return </span><span class="s1">locale</span><span class="s3">.</span><span class="s1">getpreferredencoding</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">UnclosingTextIOWrapper</span><span class="s3">(</span><span class="s1">TextIOWrapper</span><span class="s3">):</span>
+    <span class="s6"># Don't close underlying buffer on destruction.</span>
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">flush</span><span class="s3">()</span>
+</pre>
+</body>
+</html>
