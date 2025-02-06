@@ -1,8 +1,10 @@
-from connectors.vector_db_connector import VectorDBConnector
+from langchain_core import documents
+
 from tokenizer.text_tokenizer import TextTokenizer
 from langchain.schema import Document
 from scipy.spatial.distance import cosine
 from utilities.customlogger import logger
+from configs.config import Config
 
 '''
 Considerations for Storing Embeddings
@@ -38,15 +40,15 @@ class StoreEmbeddings:
     from scipy.spatial.distance import cosine
 
     @staticmethod
-    def is_duplicate(vector_db_connector, requirement_embedding, format_type, similarity_threshold=0.8,
+    def is_duplicate(vector_db_connector, requirement_embedding, metadata, similarity_threshold=0.8,
                      return_similar=False, k=5):
         """
         Check if a requirement embedding is similar to any existing embeddings in the database for a specific format,
         or return similar documents.
 
+        :param metadata:
         :param vector_db_connector: Instance of VectorDBConnector for database operations.
         :param requirement_embedding: Embedding vector of the new requirement.
-        :param format_type: The format type to check for duplication (e.g., plain_text, bdd).
         :param similarity_threshold: The similarity threshold to determine duplication.
         :param return_similar: If True, return the list of similar documents instead of a boolean.
         :param k: Number of similar results to retrieve.
@@ -60,32 +62,60 @@ class StoreEmbeddings:
 
         # Process the results to filter by format and calculate similarity
         matching_docs = []
+        best_match = None
+        highest_priority = -1
+
         for doc in similar_docs:
-            if doc.metadata.get("format") == format_type:
-                # Dynamically compute embedding for the retrieved document
-                doc_embedding = vector_db_connector.embedding_model.embed_query(doc.page_content)
+            # Dynamically compute embedding for the retrieved document
+            doc_embedding = vector_db_connector.embedding_model.embed_query(doc.page_content)
 
-                # Calculate cosine similarity
-                similarity_score = 1 - cosine(requirement_embedding, doc_embedding)
-                logger.debug(f"Calculated similarity score: {similarity_score:.2f} for format: {format_type}")
+            # Calculate cosine similarity
+            similarity_score = 1 - cosine(requirement_embedding, doc_embedding)
+            logger.debug(f"Calculated similarity score: {similarity_score:.2f} for format: {metadata.get(Config.USE_CASE_TG_METADATA_FMT)}.")
 
-                # Check if the similarity score meets the threshold
-                if similarity_score >= similarity_threshold:
-                    matching_docs.append({"document": doc, "similarity_score": similarity_score})
-                    print(matching_docs)
+            # Skip documents below the similarity threshold
+            if similarity_score < similarity_threshold:
+                continue
+
+            # Retrieve document metadata
+            doc_metadata = doc.metadata
+            format_match = doc_metadata.get("format") == metadata.get(Config.USE_CASE_TG_METADATA_FMT)
+            mne_match = doc_metadata.get("mne")  == metadata.get(Config.USE_CASE_TG_METADATA_MNE)
+            tech_match = doc_metadata.get("tech")  == metadata.get(Config.USE_CASE_TG_METADATA_TECH)
+
+            # Determine the match priority
+            priority = 0
+            if format_match:
+                priority += 1
+            if mne_match:
+                priority += 1
+            if tech_match:
+                priority += 1
+
+            # Add document to the matching_docs list
+            matching_docs.append({"document": doc, "similarity_score": similarity_score, "priority": priority})
+
+            # Update the best match if the current document has a higher priority
+            if priority > highest_priority:
+                highest_priority = priority
+                best_match = {"document": doc, "similarity_score": similarity_score, "priority": priority}
 
         if return_similar:
+            # Sort matching documents by priority and similarity score (highest first)
+            matching_docs.sort(key=lambda x: (x["priority"], x["similarity_score"]), reverse=True)
             return matching_docs
 
-        # Return True if any document meets the threshold
-        return len(matching_docs) > 0
+        # Return True if any document meets the threshold and is the best match
+        return best_match is not None
 
-    def add_embeddings(self, requirements, completions=None, format_type="plain_text"):
+    def add_embeddings(self, requirements, completions=None, metadata=None):
         """
-        Add documents to the vector database without storing embeddings in the metadata.
+        Add documents to the vector database, storing requirement as searchable content
+        and completion as a separate parameter.
+
         :param requirements: List of requirements (text).
         :param completions: List of test cases corresponding to the requirements.
-        :param format_type: Format of the test cases (e.g., 'plain_text', 'bdd', 'other').
+        :param metadata: List of metadata dictionaries corresponding to the requirements.
         """
         documents = []
 
@@ -94,18 +124,23 @@ class StoreEmbeddings:
             if not isinstance(requirement, str):
                 raise ValueError(f"Requirement must be a string, got {type(requirement)} instead.")
 
-            # Tokenize and prepare for insertion
+            # Retrieve the corresponding completion and metadata
             completion = completions[i] if completions and i < len(completions) else ""
+            requirement_metadata = metadata[i] if metadata and i < len(metadata) else {}
+
+            # Add additional metadata if necessary
+            requirement_metadata.update({
+               Config.USE_CASE_LABEL : Config.USE_CASE_TYPE_TG
+            })
+
+            # Tokenize requirement into chunks
             chunks = self.text_tokenizer.tokenize(requirement)
 
+            # Create documents with requirement as `page_content` and completion as a separate parameter
             for chunk in chunks:
-                metadata = {
-                    "type": "requirement",
-                    "format": format_type,
-                    "completion": completion
-                }
-                documents.append(Document(page_content=chunk, metadata=metadata))
+                documents.append(Document(page_content=chunk, metadata=requirement_metadata))
 
+        # Add documents to the vector database if any are created
         if documents:
             self.vector_db_connector.execute("add", documents=documents)
             logger.info(f"Added {len(documents)} documents to the vector database.")
@@ -113,6 +148,85 @@ class StoreEmbeddings:
         else:
             logger.info("No new documents to add.")
             return 0
+
+    def update_or_create_record(self, requirement, metadata, content_updates=None, k=5):
+        """
+        Update an existing record in the vector database if metadata matches, otherwise create a new record.
+
+        :param requirement: The requirement text used to find the existing record.
+        :param metadata: Metadata dictionary for matching and updating the record.
+        :param content_updates: The updated content for the requirement if updating.
+        :param k: Number of similar documents to retrieve.
+        :return: A boolean indicating whether the record was updated (True) or created (False).
+        """
+        # Validate inputs
+        if not isinstance(requirement, str):
+            raise ValueError("Requirement must be a string.")
+        if not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a dictionary.")
+
+        # Generate embedding for the requirement
+        requirement_embedding = self.vector_db_connector.embedding_model.embed_query(requirement)
+
+        # Query for the most similar documents
+        similar_docs = self.is_duplicate(
+            self.vector_db_connector,
+            requirement_embedding=requirement_embedding,
+            metadata=metadata,
+            return_similar=True,
+            k=k
+        )
+
+        best_match = None
+        best_similarity = 0
+
+        for result in similar_docs:
+            doc = result["document"]
+            similarity_score = result["similarity_score"]
+
+            if similarity_score >= self.similarity_threshold:
+                doc_metadata = doc.metadata
+
+                # Check if all metadata attributes match
+                metadata_match = all(doc_metadata.get(key) == metadata.get(key) for key in metadata.keys())
+
+                if metadata_match and similarity_score > best_similarity:
+                    best_match = doc
+                    best_similarity = similarity_score
+
+        if best_match:
+            logger.info(f"Matching document found with similarity score: {best_similarity:.2f}. Updating record.")
+
+            # Delete the existing document before updating
+            try:
+                self.vector_db_connector.execute("delete", doc_ids=[best_match.id])
+                logger.info("Existing document deleted successfully.")
+            except Exception as e:
+                logger.error(f"Error deleting existing document: {str(e)}")
+                raise RuntimeError("Failed to delete the existing document.")
+
+            # Prepare updated metadata and content
+            updated_metadata = metadata.copy()
+
+            updated_content = content_updates if content_updates else best_match.page_content
+
+            # Add the updated document back to the vector database
+            updated_document = Document(
+                page_content=requirement,
+                metadata=updated_metadata,
+                completion=updated_content,
+            )
+            self.vector_db_connector.execute("add", documents=[updated_document])
+            logger.info("Document updated successfully in the vector database.")
+            return True  # Updated existing record
+
+        # If no exact metadata match found, create a new record
+        logger.info("No exact metadata match found. Creating a new record.")
+        self.add_embeddings([requirement], [content_updates if content_updates else ""], [metadata])
+        return False  # Created a new record
+
+
+
 
 
     def close(self):

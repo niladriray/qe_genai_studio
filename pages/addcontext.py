@@ -4,6 +4,7 @@ import pandas as pd
 import io, dash, math
 import base64
 from models.test_case_generator import TestCaseGenerator
+from configs.config import Config
 
 
 def create_cards_from_page_data(page_data):
@@ -32,14 +33,21 @@ def create_cards_from_page_data(page_data):
                 ),
                 dbc.CardBody(
                     [
+                        html.H5("Details", className="card-title"),
+                        html.P(
+                            [
+                                "MNE: ", html.Strong(record.get("mne", "N/A")),
+                                ", Tech: ", html.Strong(record.get("tech", "N/A")),
+                                ", Format: ", html.Strong(record.get("Format", "plain_text")),
+                            ],
+                            className="card-text",
+                        ),
                         html.H5("Requirement", className="card-title"),
-                        html.P(record["Requirement"], className="card-text"),
-                        html.H5("Format", className="card-title"),
-                        html.P(record["Format"], className="card-text"),
+                        html.P(record.get("Requirement", "No requirement provided."), className="card-text"),
                         html.H5("Test Case", className="card-title"),
                         dcc.Markdown(record.get("Test Case", "No test case available."), className="card-text"),
                     ]
-                ),
+                )
             ],
             style={"margin-bottom": "15px"},
         )
@@ -178,29 +186,30 @@ def register_callbacks(app: Dash):
                     use_gpt_embeddings=False,
                 )
 
-                # Submit test cases for all formats and ensure correct order handling
-                added_count = 0
-                already_exist_count = 0
-                for idx, record in enumerate(data_list):
-                    req = record["Requirement"]
-                    comp = record.get("Test Case", "")
-                    fmt = record.get("Format", "plain_text")  # Default format if not provided
+                # Convert the data to a DataFrame for processing
+                df = pd.DataFrame(data_list)
 
-                    # Add the test cases using the correct format
-                    status = generator.add_test_cases([req], [comp], format=fmt)
+                # Extract requirements, test cases, and metadata
+                requirements = df["Requirement"].tolist()
+                test_cases = df["Test Case"].tolist()
+                metadata = df[["mne", "tech", "Format"]].to_dict("records")
+                metadata = [{**record, Config.USE_CASE_TG_METADATA_PRIORITY: Config.USE_CASE_TG_DEFAULT_PRIORITY} for record in metadata]
 
+                # Call add_test_cases once with all data
+                statuses = generator.add_test_cases("tg", requirements, test_cases, metadata=metadata)
 
-                    # Update the `Status` field for this record
-                    record["Status"] = status[0]["status"]  # Update the status with the correct format
-                    if status[0]["status"] == "Added":
-                        added_count += 1
-                    else:
-                        already_exist_count += 1
+                # Update the DataFrame with the statuses
+                for i, status in enumerate(statuses):
+                    data_list[i]["Status"] = status["status"]
+
                 # Refresh the current page
                 start_idx = (current_page - 1) * PAGE_SIZE
                 end_idx = start_idx + PAGE_SIZE
                 page_data = data_list[start_idx:end_idx]
                 cards = create_cards_from_page_data(page_data)
+
+                added_count = sum(1 for status in statuses if status["status"] == "Added")
+                already_exist_count = len(statuses) - added_count
 
                 submission_message = f"Submission successful - {added_count} added, {already_exist_count} already exist."
 

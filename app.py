@@ -1,6 +1,6 @@
 from dash import Dash, dcc, html, Input, Output, State, ctx
 import toolbox  # Import the toolbox
-from pages import addcontext, generatetestcase
+from pages import addcontext, generatetestcase, browseprompt
 import dash_bootstrap_components as dbc
 import os
 
@@ -119,12 +119,15 @@ def display_page(pathname):
         return addcontext.layout
     elif pathname == "/generatetestcase":
         return generatetestcase.layout
+    elif pathname == "/browseprompt":
+        return browseprompt.layout
     else:
         return html.H1("Welcome to the Dashboard!", style={"text-align": "center"})
 
 # Register callbacks for candlestick.py
 addcontext.register_callbacks(app)
 generatetestcase.register_callbacks(app)
+browseprompt.register_callbacks(app)
 
 
 if __name__ == "__main__":

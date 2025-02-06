@@ -1,10 +1,10 @@
-from abc import ABC
+from configs.config import Config
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from connectors.base_connector import BaseConnector
 from utilities.customlogger import logger
-
+from typing import Optional
 
 
 class VectorDBConnector(BaseConnector):
@@ -12,50 +12,54 @@ class VectorDBConnector(BaseConnector):
     Connector class for handling operations with a vector database.
     """
 
-    def __init__(self, db_path="vector_db", use_gpt_embeddings=True):
+    def __init__(self, db_path: str = "vector_db", use_gpt_embeddings: bool = True):
         """
         Initialize the connector with the vector database path and embedding configuration.
         :param db_path: Directory to persist the vector database.
         :param use_gpt_embeddings: Flag to determine the embedding model to use (GPT or local).
         """
-        self.db_path = db_path
-        self.use_gpt_embeddings = use_gpt_embeddings
+        self.db_path: str = db_path
+        self.use_gpt_embeddings: bool = use_gpt_embeddings
         self.embedding_model = self._initialize_embedding_model()
-        self.vector_db = None
+        self.vector_db: Optional[Chroma] = None
 
     def _initialize_embedding_model(self):
         """
         Initialize the embedding model based on configuration.
         :return: An instance of the embedding model.
         """
-        if self.use_gpt_embeddings:
-            logger.debug("Using GPT-based embeddings (OpenAIEmbeddings).")
-            return OpenAIEmbeddings()
-        else:
-            logger.debug("Using local embeddings (HuggingFaceEmbeddings).")
-            return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        try:
+            if self.use_gpt_embeddings:
+                logger.debug("Using GPT-based embeddings (OpenAIEmbeddings).")
+                return OpenAIEmbeddings()
+            else:
+                logger.debug("Using local embeddings (HuggingFaceEmbeddings).")
+                return HuggingFaceEmbeddings(model_name=Config.HUGGINGFACE_EMBEDDINGS)
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding model: {str(e)}")
+            raise
 
     def connect(self):
         """
-        Connect to the vector database and initialize the vector store.
+        Connect to the vector database and initialize the collection.
         """
-        logger.debug("Connecting to vector database...")
         try:
             self.vector_db = Chroma(
                 persist_directory=self.db_path,
                 embedding_function=self.embedding_model
             )
-            logger.debug(f"Connected to vector database at {self.db_path}")
+            logger.info(f"Connected to vector database at {self.db_path}.")
         except Exception as e:
-            logger.error(f"Error connecting to vector database: {e}")
-            self.vector_db = None
+            logger.error(f"Failed to connect to vector database: {str(e)}")
+            raise
 
     def disconnect(self):
         """
         Disconnect from the vector database.
         """
-        self.vector_db = None
-        logger.debug("Disconnected from vector database.")
+        if self.vector_db:
+            self.vector_db = None
+            logger.info("Disconnected from vector database.")
 
     def execute(self, operation, *args, **kwargs):
         """
@@ -113,6 +117,19 @@ class VectorDBConnector(BaseConnector):
             except Exception as e:
                 logger.error(f"Error during similarity search: {e}")
                 raise
+
+        elif operation == "delete":
+            doc_ids = kwargs.get("doc_ids")
+            if not doc_ids or not isinstance(doc_ids, list):
+                raise ValueError("`doc_ids` must be a non-empty list of document IDs to delete.")
+
+            try:
+                self.vector_db.delete(doc_ids)
+                logger.info(f"Successfully deleted {len(doc_ids)} documents from the vector database.")
+            except Exception as e:
+                logger.error(f"Error deleting documents: {str(e)}")
+                raise
+
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 
@@ -131,3 +148,39 @@ class VectorDBConnector(BaseConnector):
             return query
         else:
             raise ValueError("Query must be a string, a list of strings, or a valid embedding (list of floats).")
+
+
+    def get_collection(self, collection_name: str = "default"):
+        """
+        Retrieve or create a collection in the vector database.
+        :param collection_name: Name of the collection.
+        :return: The collection object.
+        """
+        if not self.vector_db:
+            raise RuntimeError("Vector database is not connected. Call `connect()` first.")
+
+        try:
+            collection = self.vector_db.get_or_create_collection(name=collection_name)
+            logger.info(f"Retrieved or created collection '{collection_name}'.")
+            return collection
+        except Exception as e:
+            logger.error(f"Failed to get or create collection: {str(e)}")
+            raise
+
+    def delete_collection(self, docid: list = None):
+        self.vector_db.delete(docid)
+
+    def delete_all_documents(self, paskey):
+        """
+        Delete all documents in the ChromaDB collection.
+        """
+        if paskey != "delme": return
+        if not self.vector_db:
+            raise RuntimeError("Vector database is not connected. Call `connect()` first.")
+        try:
+            # Assuming the vector DB collection has a `delete` method with a wildcard to delete all documents
+            collection = self.get_collection()
+            collection.delete()
+            print("All documents have been deleted from the collection.")
+        except Exception as e:
+            print(f"Error deleting all documents: {e}")

@@ -66,6 +66,31 @@ def get_toolbox():
                     "cursor": "pointer",
                 }
             ),
+            html.Div(
+                dcc.Link(
+                    html.Img(
+                        id="browseprompt-icon",
+                        src="/assets/browseprompt.png",
+                        style={
+                            "width": "40px",
+                            "height": "40px",
+                            "margin": "10px auto",
+                            "display": "block",
+                            "cursor": "pointer"
+                        }
+                    ),
+                    href="/browseprompt",
+                ),
+                id="browseprompt-container",
+                style={
+                    "padding": "10px",
+                    "text-align": "center",
+                    "background-color": "#DADBDA",
+                    "border-radius": "10px",
+                    "margin": "5px",
+                    "cursor": "pointer",
+                }
+            ),
         ], style={
             "display": "flex",
             "flex-direction": "column",
@@ -93,6 +118,7 @@ def get_toolbox():
     [
         Output("addcontext-container", "style"),
         Output("generatetestcase-container", "style"),
+        Output("browseprompt-container", "style"),
     ],
     [Input("url", "pathname")]
 )
@@ -127,4 +153,5 @@ def update_toolbox_highlight(pathname):
     return [
         selected_style if pathname == "/addcontext" else default_style,
         selected_style if pathname == "/generatetestcase" else default_style,
+        selected_style if pathname == "/browseprompt" else default_style,
     ]
