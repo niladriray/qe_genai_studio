@@ -125,32 +125,9 @@ class TestCaseGenerator:
 
         try:
             # Generate the test case using the GPT model
-            #response = self.llm.invoke(prompt)
-            #generated_text = response.content
-            generated_text = '''
-                Feature: Generated Test Case
+            response = self.llm.invoke(prompt)
+            generated_text = response.content
 
-Scenario: Feature: New Customer Online Checking Account Opening
-  As a new customer,
-  I want to be able to easily open a new checking account online
-  So that I can start banking without having to visit a branch
-
-  Scenario: New customer successfully opens a checking account online
-    Given I have navigated to the bank's website
-    When I click on the "Open New Account" button
-    And I select "Checking Account" from the available options
-    And I fill in the required information such as name, address, social security number, and initial deposit amount
-    And I click the "Submit" button
-    Then I should see a confirmation message stating the checking account has been successfully opened
-    When I log in to the new account using the provided credentials
-    Then I should see that the account balance reflects the initial deposit amount
-    And I should see that the account details (name, address etc.) are correctly displayed
-    When I log out from the account
-    Then I should be logged out successfully
-Given precondition
-When action
-Then expected result
-            '''
         except Exception as e:
             logger.error(f"Error generating test case: {e}")
             raise RuntimeError("Test case generation failed.")

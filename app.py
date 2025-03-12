@@ -18,6 +18,22 @@ app.layout = html.Div([
     # Header
     html.Div(
         [
+            # Home Icon (Click to Navigate to Home Page)
+            html.A(
+                html.Img(
+                    src="/assets/home-icon.png",  # Make sure to place a home icon in the assets folder
+                    style={
+                        "height": "30px",  # Adjust size
+                        "width": "30px",
+                        "margin-left": "15px",
+                        "margin-top": "10px",
+                        "cursor": "pointer",
+                    }
+                ),
+                href="/home"  # Static URL for home navigation
+            ),
+
+            # Title (Centered)
             html.H2(
                 "Test Case Generator",
                 style={
@@ -29,6 +45,8 @@ app.layout = html.Div([
                     "font-size": "24px",
                 }
             ),
+
+            # Subtitle (Bottom Right)
             html.H3(
                 "PNC Retail QE - GenAI Proof of Technology",
                 style={
@@ -45,8 +63,10 @@ app.layout = html.Div([
             "background-color": "black",
             "color": "white",
             "position": "relative",
-            "height": "50px",  # Reduced height
+            "height": "50px",  # Adjusted height
             "width": "100%",
+            "display": "flex",
+            "align-items": "center",
         }
     ),
 
@@ -86,7 +106,7 @@ app.layout = html.Div([
 
     # Footer
     html.Div(
-        "GPT & HuggingFace Embeddings IN ACTION",
+        "GPT & HuggingFace Embeddings in action",
         style={
             "background-color": "black",
             "color": "white",
@@ -122,7 +142,48 @@ def display_page(pathname):
     elif pathname == "/browseprompt":
         return browseprompt.layout
     else:
-        return html.H1("Welcome to the Dashboard!", style={"text-align": "center"})
+        return dbc.Container(
+    [
+        html.H1("Welcome to Generative AI-Powered Test Case Generation", style={"text-align": "center", "margin-bottom": "20px"}),
+
+        html.P(
+            [
+                "In today's fast-paced software development landscape, ensuring comprehensive test coverage is essential. ",
+                html.Strong("Our RAG (Retrieval-Augmented Generation) based GenAI Platform"),
+                " revolutionizes test case generation by leveraging context-aware AI to transform raw requirements into structured, executable test cases "
+                "in multiple formats, including ", html.Strong("Plain Text, BDD, and more."),
+            ],
+            style={"text-align": "center", "font-size": "18px"},
+        ),
+
+        html.H2("🔹 Key Features", style={"margin-top": "30px"}),
+
+        html.Ul([
+            html.Li([html.Strong("Automated Test Case Generation – "), "Upload requirements and let AI generate test cases."]),
+            html.Li([html.Strong("Support for Multiple Formats – "), "Generate test cases in ", html.Strong("Plain Text, BDD (Gherkin), and more.")]),
+            html.Li([html.Strong("Retrieval-Augmented Generation (RAG) for Context Awareness – "), "Uses ChromaDB for smart retrieval."]),
+            html.Li([html.Strong("User-Friendly Dashboard – "), "Edit, review, and manage generated test cases."]),
+            html.Li([html.Strong("Adaptive AI Learning – "), "AI improves based on user feedback."]),
+            html.Li([html.Strong("Real-Time API & Batch Processing – "), "Generate test cases on-demand via API calls."]),
+        ], style={"font-size": "16px"}),
+
+        html.H2("🚀 Future Possibilities", style={"margin-top": "30px"}),
+
+        html.Ul([
+            html.Li([html.Strong("Defect Analytics and Insights – "), "Analyze Defects and Production Incident contents and generate insights."]),
+            html.Li([html.Strong("Agentic Development – "), "Development of Agents automating repetitive manual tasks"]),
+            html.Li([html.Strong("Mult-Modal integration – "), "Image, Video, Audio data analysis to automate human dependent tests like A11y."]),
+        ], style={"font-size": "16px"}),
+
+        html.Div(style={"margin-top": "40px", "text-align": "center"}, children=[
+            html.H4(html.Strong("Get Started Today!")),
+            html.P("Experience the future of AI-powered test case generation."),
+            dbc.Button("Try It Now", color="primary", href="/generatetestcase"),
+        ]),
+    ],
+    fluid=True,
+    style={"max-width": "900px", "margin": "auto", "padding": "20px"},
+)
 
 # Register callbacks for candlestick.py
 addcontext.register_callbacks(app)

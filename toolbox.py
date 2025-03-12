@@ -1,5 +1,5 @@
 from dash import html, dcc, Input, Output, callback
-
+import dash_bootstrap_components as dbc
 
 def get_toolbox():
     return html.Div([
@@ -16,6 +16,7 @@ def get_toolbox():
 
         # Toolbox Links (Wrapped in Containers)
         html.Div([
+            # Add Context
             html.Div(
                 dcc.Link(
                     html.Img(
@@ -41,6 +42,9 @@ def get_toolbox():
                     "cursor": "pointer",
                 }
             ),
+            dbc.Tooltip("Upload Test Cases", target="addcontext-icon", placement="right"),
+
+            # Generate Test Cases
             html.Div(
                 dcc.Link(
                     html.Img(
@@ -66,6 +70,9 @@ def get_toolbox():
                     "cursor": "pointer",
                 }
             ),
+            dbc.Tooltip("Generate Test Cases", target="generatetestcase-icon", placement="right"),
+
+            # Browse Prompts
             html.Div(
                 dcc.Link(
                     html.Img(
@@ -91,6 +98,8 @@ def get_toolbox():
                     "cursor": "pointer",
                 }
             ),
+            dbc.Tooltip("Browse Prompts", target="browseprompt-icon", placement="right"),
+
         ], style={
             "display": "flex",
             "flex-direction": "column",
