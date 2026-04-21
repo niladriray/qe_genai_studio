@@ -69,8 +69,9 @@ class RAG_Text:
         prompt = f"Here is the context from the database:\n{context}\n\nGenerate a response for the query:\n{query}"
 
         try:
+            from configs import settings_store
             response = openai.ChatCompletion.create(
-                model="gpt-4",
+                model=settings_store.get("llm.openai.model", "gpt-4o-mini"),
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": prompt}

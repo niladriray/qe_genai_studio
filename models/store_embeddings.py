@@ -41,7 +41,7 @@ class StoreEmbeddings:
 
     @staticmethod
     def is_duplicate(vector_db_connector, requirement_embedding, metadata, similarity_threshold=0.8,
-                     return_similar=False, k=5):
+                     return_similar=False, k=5, profile=None):
         """
         Check if a requirement embedding is similar to any existing embeddings in the database for a specific format,
         or return similar documents.
@@ -57,52 +57,82 @@ class StoreEmbeddings:
         if not isinstance(requirement_embedding, list):
             raise ValueError(f"Requirement embedding must be a list, got {type(requirement_embedding)}.")
 
+        # Resolve profile lazily so existing callers that don't pass one still work.
+        if profile is None:
+            from domains.registry import default_profile
+            profile = default_profile()
+
         # Query for the most similar documents (retrieves text-based documents)
         similar_docs = vector_db_connector.execute("query", query=requirement_embedding, k=k)
 
         # Process the results to filter by format and calculate similarity
         matching_docs = []
         best_match = None
-        highest_priority = -1
+        highest_match_count = -1
+
+        mkeys = profile.metadata_keys
+        fmt_key = mkeys["format"]
+        mne_key = mkeys["mne"]
+        tech_key = mkeys["tech"]
+        prio_key = mkeys["priority"]
+        profile_domain = profile.name
 
         for doc in similar_docs:
+            # Scope retrieval to the active domain. Legacy records without a
+            # "domain" tag default to Config.DEFAULT_DOMAIN so test_case behavior
+            # is preserved end-to-end.
+            doc_domain = doc.metadata.get("domain", Config.DEFAULT_DOMAIN)
+            if doc_domain != profile_domain:
+                continue
+
             # Dynamically compute embedding for the retrieved document
             doc_embedding = vector_db_connector.embedding_model.embed_query(doc.page_content)
 
             # Calculate cosine similarity
             similarity_score = 1 - cosine(requirement_embedding, doc_embedding)
-            logger.debug(f"Calculated similarity score: {similarity_score:.2f} for format: {metadata.get(Config.USE_CASE_TG_METADATA_FMT)}.")
+            logger.debug(f"Calculated similarity score: {similarity_score:.2f} for format: {metadata.get(fmt_key)}.")
 
             # Skip documents below the similarity threshold
             if similarity_score < similarity_threshold:
                 continue
 
-            # Retrieve document metadata
+            # Retrieve document metadata. Check format/mne/tech under both the
+            # short keys ("fmt"/"mne"/"tech") and legacy long keys stored on
+            # older records.
             doc_metadata = doc.metadata
-            format_match = doc_metadata.get("format") == metadata.get(Config.USE_CASE_TG_METADATA_FMT)
-            mne_match = doc_metadata.get("mne")  == metadata.get(Config.USE_CASE_TG_METADATA_MNE)
-            tech_match = doc_metadata.get("tech")  == metadata.get(Config.USE_CASE_TG_METADATA_TECH)
+            format_match = doc_metadata.get(fmt_key, doc_metadata.get("format")) == metadata.get(fmt_key)
+            mne_match = doc_metadata.get(mne_key) == metadata.get(mne_key)
+            tech_match = doc_metadata.get(tech_key) == metadata.get(tech_key)
 
-            # Determine the match priority
-            priority = 0
-            if format_match:
-                priority += 1
-            if mne_match:
-                priority += 1
-            if tech_match:
-                priority += 1
+            metadata_match_count = int(format_match) + int(mne_match) + int(tech_match)
 
-            # Add document to the matching_docs list
-            matching_docs.append({"document": doc, "similarity_score": similarity_score, "priority": priority})
+            try:
+                feedback_priority = float(doc_metadata.get(prio_key, Config.USE_CASE_TG_DEFAULT_PRIORITY))
+            except (TypeError, ValueError):
+                feedback_priority = Config.USE_CASE_TG_DEFAULT_PRIORITY
 
-            # Update the best match if the current document has a higher priority
-            if priority > highest_priority:
-                highest_priority = priority
-                best_match = {"document": doc, "similarity_score": similarity_score, "priority": priority}
+            # Combined rank: similarity dominates, feedback priority nudges.
+            combined_score = similarity_score + Config.USE_CASE_TG_PRIORITY_WEIGHT * feedback_priority
+
+            matching_docs.append({
+                "document": doc,
+                "similarity_score": similarity_score,
+                "priority": metadata_match_count,             # kept for backward-compat with callers
+                "metadata_match_count": metadata_match_count,
+                "feedback_priority": feedback_priority,
+                "combined_score": combined_score,
+            })
+
+            if metadata_match_count > highest_match_count:
+                highest_match_count = metadata_match_count
+                best_match = matching_docs[-1]
 
         if return_similar:
-            # Sort matching documents by priority and similarity score (highest first)
-            matching_docs.sort(key=lambda x: (x["priority"], x["similarity_score"]), reverse=True)
+            # Rank by metadata fit first, then by combined (similarity + feedback priority).
+            matching_docs.sort(
+                key=lambda x: (x["metadata_match_count"], x["combined_score"]),
+                reverse=True,
+            )
             return matching_docs
 
         # Return True if any document meets the threshold and is the best match

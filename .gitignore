@@ -1,0 +1,28 @@
+# Runtime secrets / config
+configs/settings.json
+
+# Python / IDE
+__pycache__/
+**/__pycache__/
+*.pyc
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+.venv/
+venv/
+
+# Runtime-managed state (regenerated automatically)
+logs/*.log
+data/chroma.sqlite3
+data/bm25/
+data/metrics.json
+data/[0-9a-f]*-*/          # per-UUID Chroma HNSW folders
+chromadb/                  # per-KB Chroma stores + uploads + BM25 + parents
+configs/kb_registry.json   # user-specific KB index
+
+# User-generated output
+tests/docs/
+
+# Claude Code local scratch
+.claude/

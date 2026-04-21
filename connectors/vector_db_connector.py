@@ -130,6 +130,21 @@ class VectorDBConnector(BaseConnector):
                 logger.error(f"Error deleting documents: {str(e)}")
                 raise
 
+        elif operation == "list_all":
+            # Return every stored document. Chroma's `.get()` skips the
+            # similarity search that "*" would otherwise embed literally.
+            try:
+                raw = self.vector_db.get(include=["documents", "metadatas"])
+            except Exception as e:
+                logger.error(f"Error listing documents: {e}")
+                raise
+            from langchain.schema import Document
+            docs = []
+            for content, meta in zip(raw.get("documents", []) or [], raw.get("metadatas", []) or []):
+                docs.append(Document(page_content=content or "", metadata=meta or {}))
+            logger.debug(f"Listed {len(docs)} documents from vector database.")
+            return docs
+
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 

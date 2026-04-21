@@ -93,7 +93,7 @@ try:
     # Step 6: Generate a new test case using GPT
     logger.info("\nGenerating a new test case using GPT...")
     new_requirement = "Check functionality of updating user profile details."
-    generated_test_case = generator.generate_test_case(
+    generated_test_case, metrics = generator.generate_test_case(
         query=new_requirement,
         format="bdd",
         k=3,  # Use top-3 similar test cases for context
@@ -101,6 +101,7 @@ try:
 
     logger.info("\n--- Generated Test Case ---")
     print(generated_test_case)
+    print(f"\n--- Performance Metrics ---\n{metrics}")
 
 
 except Exception as e:
