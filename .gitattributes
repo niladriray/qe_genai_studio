@@ -1,0 +1,22 @@
+# Normalize line endings on checkin so mixed Windows/Mac/Linux
+# contributors don't churn LF <-> CRLF.
+* text=auto eol=lf
+
+# Windows shell scripts must keep CRLF at checkout.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never touch line endings.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.pkl   binary
+*.pickle binary
+*.sqlite3 binary
+*.whl   binary
+*.xlsx  binary
+*.docx  binary
+*.pptx  binary
