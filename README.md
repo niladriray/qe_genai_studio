@@ -87,7 +87,7 @@ cd PNCGenAI
 
 ```bash
 python3.11 -m venv .venv
-source .venv/bin/activate            # bash / zsh
+source .venv/bin/activate            # bash/zsh
 #  .venv\Scripts\activate            # Windows PowerShell
 ```
 
