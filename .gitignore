@@ -1,5 +1,17 @@
 # Runtime secrets / config
 configs/settings.json
+configs/gptapigateway.properties
+
+# SSH / credential files that should never land in a repo
+*.pem
+*.key
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+# Keys with custom names from this project's history
+Y
+Y.pub
 
 # Python / IDE
 __pycache__/
@@ -13,16 +25,25 @@ __pycache__/
 venv/
 
 # Runtime-managed state (regenerated automatically)
-logs/*.log
+logs/
+# per-UUID Chroma HNSW folders inside ./data
+data/[0-9a-f]*-*/
 data/chroma.sqlite3
 data/bm25/
 data/metrics.json
-data/[0-9a-f]*-*/          # per-UUID Chroma HNSW folders
-chromadb/                  # per-KB Chroma stores + uploads + BM25 + parents
-configs/kb_registry.json   # user-specific KB index
+# per-KB Chroma stores + uploads + BM25 + parents
+chromadb/
+# user-specific KB index
+configs/kb_registry.json
 
 # User-generated output
 tests/docs/
+# test fixtures that mirror the runtime chroma layout
+tests/data/
+
+# Sample data that may contain real content
+sample_banking_epics.xlsx
 
 # Claude Code local scratch
 .claude/
+.playwright-mcp/
