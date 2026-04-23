@@ -154,7 +154,8 @@ def _build_home_page():
         [
             html.H1(
                 "QE GenAI Studio",
-                style={"fontSize": "42px", "fontWeight": 700, "marginBottom": "8px"},
+                style={"fontSize": "42px", "fontWeight": 700,
+                       "marginBottom": "8px", "color": "#ffffff"},
             ),
             html.P(
                 "Generate, retrieve, and chat — all grounded in your team's knowledge.",
@@ -213,11 +214,48 @@ def _build_home_page():
         },
     )
 
+    _ICON_BLUE = "#2563eb"
+    _ICON_RED = "#dc2626"
+
+    _ICON_PATHS = {
+        # Feather-style outline paths (24x24 viewBox).
+        "zap":     '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+        "book":    ('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>'
+                    '<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
+        "upload":  ('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+                    '<polyline points="17 8 12 3 7 8"/>'
+                    '<line x1="12" y1="3" x2="12" y2="15"/>'),
+        "search":  ('<circle cx="11" cy="11" r="8"/>'
+                    '<line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
+        "layers":  ('<polygon points="12 2 2 7 12 12 22 7 12 2"/>'
+                    '<polyline points="2 17 12 22 22 17"/>'
+                    '<polyline points="2 12 12 17 22 12"/>'),
+        "bars":    ('<line x1="18" y1="20" x2="18" y2="10"/>'
+                    '<line x1="12" y1="20" x2="12" y2="4"/>'
+                    '<line x1="6" y1="20" x2="6" y2="14"/>'),
+    }
+
+    def _svg_icon(name, color):
+        body = _ICON_PATHS[name]
+        svg = (
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' "
+            f"fill='none' stroke='{color}' stroke-width='2' "
+            f"stroke-linecap='round' stroke-linejoin='round'>{body}</svg>"
+        )
+        from urllib.parse import quote
+        data_url = "data:image/svg+xml;utf8," + quote(svg)
+        return html.Img(src=data_url, alt="",
+                        style={"width": "44px", "height": "44px"})
+
     def _workflow_card(icon, title, desc, href, badge=None):
+        if isinstance(icon, tuple):
+            icon_el = _svg_icon(icon[0], icon[1])
+        else:
+            icon_el = icon
         body_children = [
             html.Div(
-                icon,
-                style={"fontSize": "36px", "marginBottom": "12px"},
+                icon_el,
+                style={"marginBottom": "12px", "lineHeight": "1"},
             ),
             html.H5(title, style={"fontWeight": 600, "marginBottom": "8px"}),
         ]
@@ -248,37 +286,37 @@ def _build_home_page():
     workflows = dbc.Row(
         [
             _workflow_card(
-                "🚀", "Generate",
+                ("zap", _ICON_BLUE), "Generate",
                 "Generate test cases, user stories, or automation scripts grounded in your "
                 "curated A→B examples — with optional KB augmentation per row.",
                 "/generatetestcase", badge="HYBRID + KB AUGMENT",
             ),
             _workflow_card(
-                "💬", "Knowledge Base",
+                ("book", _ICON_BLUE), "Knowledge Base",
                 "Create named KBs from PDF / DOCX / PPTX / MD / images. Chat with them, "
                 "or chat with the generate-path domain stores as read-only sources.",
                 "/knowledge-base", badge="4-STAGE PIPELINE",
             ),
             _workflow_card(
-                "📥", "Add Context",
+                ("upload", _ICON_RED), "Add Context",
                 "Seed a domain profile with curated source → target examples by uploading "
                 "a CSV or XLSX. The shared retrieval engine indexes every record.",
                 "/addcontext",
             ),
             _workflow_card(
-                "🔍", "Browse Prompts",
+                ("search", _ICON_BLUE), "Browse Prompts",
                 "Explore stored prompts and knowledge-base entries to see what the engine "
                 "has learned across all domains.",
                 "/browseprompt",
             ),
             _workflow_card(
-                "◇", "Manage Domains",
+                ("layers", _ICON_BLUE), "Manage Domains",
                 "Add new source → target transformations. Each domain becomes a chat-able "
                 "store and a generation target.",
                 "/managedomain",
             ),
             _workflow_card(
-                "📊", "Metrics",
+                ("bars", _ICON_RED), "Metrics",
                 "Per-run timing breakdown — retrieval, prompt build, LLM latency, KB-context "
                 "augmentation cost.",
                 "/metrics",
@@ -642,4 +680,4 @@ knowledge_base.register_callbacks(app)
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(debug=True, threaded=True, dev_tools_ui=False)

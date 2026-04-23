@@ -59,6 +59,7 @@ _DEFAULTS: Dict[str, Any] = {
     "kb.retrieval.rerank_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
     "kb.retrieval.mmr": True,
     "kb.retrieval.mmr_lambda": 0.5,
+    "kb.retrieval.priority_weight": 0.3,  # post-rerank thumbs-up/down boost
 
     # Knowledge Base chunking (changes require a re-ingest to take effect)
     "kb.chunk.child_size": 500,

@@ -19,9 +19,10 @@ from typing import Any, Dict, List
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import ALL, Dash, Input, Output, State, callback_context, dcc, html
+from dash import ALL, MATCH, Dash, Input, Output, State, callback_context, dcc, html
 
 from configs import kb_registry, settings_store
+from configs.config import Config
 from models.kb.kb_service import KBService
 from models.kb.chat_engine import KBChatEngine
 from models.domain_store import (
@@ -208,13 +209,29 @@ def _render_domain_card(summary: Dict[str, Any], selected: bool) -> html.Div:
     )
 
 
-def _render_kb_list(selected_id: str | None) -> List[html.Div]:
+def _as_id_list(selected) -> List[str]:
+    """Normalize the kb-selected-id store value (which may be a legacy
+    scalar string or None) into a list of ids."""
+    if not selected:
+        return []
+    if isinstance(selected, str):
+        return [selected]
+    return [s for s in selected if s]
+
+
+def _sel_key(selected_ids: List[str]) -> str:
+    """Stable composite key used to scope chat history to a selection."""
+    return "|".join(sorted(_as_id_list(selected_ids)))
+
+
+def _render_kb_list(selected) -> List[html.Div]:
+    selected_ids = set(_as_id_list(selected))
     kbs = kb_registry.list_kbs()
     children: List[Any] = []
     if kbs:
         kbs = sorted(kbs, key=lambda k: k.get("updated_at", ""), reverse=True)
         children.extend(
-            _render_kb_card(kb, selected=(kb["id"] == selected_id))
+            _render_kb_card(kb, selected=(kb["id"] in selected_ids))
             for kb in kbs
         )
     else:
@@ -241,29 +258,61 @@ def _render_kb_list(selected_id: str | None) -> List[html.Div]:
                 summary = _domain_source_summary(profile)
                 children.append(
                     _render_domain_card(summary,
-                                        selected=(summary["id"] == selected_id))
+                                        selected=(summary["id"] in selected_ids))
                 )
     return children
 
 
-def _resolve_source_summary(selected_id: str | None) -> Dict[str, Any] | None:
-    """Return a KB-like dict for the current selection — either a real KB
-    from the registry or a virtual domain source. None if unknown."""
-    if not selected_id:
+def _resolve_single_summary(sid: str) -> Dict[str, Any] | None:
+    if not sid:
         return None
-    if is_domain_source_id(selected_id):
+    if is_domain_source_id(sid):
         try:
-            profile = get_profile(profile_name_from_source_id(selected_id))
+            profile = get_profile(profile_name_from_source_id(sid))
         except Exception:
             return None
         summary = _domain_source_summary(profile)
-        # Augment with a synthetic file list so the chat scope dropdown works.
         try:
             summary["files"] = DomainSource(profile.name).list_files()
         except Exception:
             summary["files"] = []
         return summary
-    return kb_registry.get_kb(selected_id)
+    return kb_registry.get_kb(sid)
+
+
+def _resolve_source_summary(selected) -> Dict[str, Any] | None:
+    """Return a KB-like dict for the current selection — a real KB, a
+    virtual domain source, or a synthetic combined view when multiple
+    sources are selected. None if unknown / empty."""
+    ids = _as_id_list(selected)
+    if not ids:
+        return None
+    if len(ids) == 1:
+        return _resolve_single_summary(ids[0])
+
+    parts = [s for s in (_resolve_single_summary(sid) for sid in ids) if s]
+    if not parts:
+        return None
+    names = " + ".join(p.get("name") or "?" for p in parts)
+    total_docs = sum(int(p.get("doc_count") or 0) for p in parts)
+    files: List[Dict[str, Any]] = []
+    seen = set()
+    for p in parts:
+        for f in (p.get("files") or []):
+            key = (f.get("file_id") or "", f.get("source_file") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            files.append(f)
+    return {
+        "id": _sel_key(ids),
+        "name": names,
+        "description": f"Combined view across {len(parts)} sources.",
+        "doc_count": total_docs,
+        "files": files,
+        "kind": "multi",
+        "member_ids": ids,
+    }
 
 
 def _welcome_pane() -> html.Div:
@@ -379,6 +428,45 @@ def _ref_location(ref: Dict[str, Any]) -> str:
     return ""
 
 
+def _render_thumbs_cell(ref: Dict[str, Any]) -> Any:
+    """Per-row 👍/👎 controls. Only rendered for ratable refs (user-KB
+    text chunks); domain hits and images get an empty cell so the grid
+    stays aligned."""
+    kb_id = ref.get("kb_id")
+    chunk_id = ref.get("chunk_id")
+    if not kb_id or not chunk_id:
+        return html.Div("", className="kb-ref-cell-thumbs")
+    return html.Div(
+        [
+            html.Button(
+                "\U0001F44D",
+                id={"type": "kb-thumbs", "action": "up",
+                    "kb_id": kb_id, "chunk_id": chunk_id},
+                n_clicks=0,
+                title="Boost this source for similar questions",
+                className="kb-thumb-btn kb-thumb-up",
+                **{"aria-label": f"Thumbs up for {ref.get('label', 'source')}"},
+            ),
+            html.Button(
+                "\U0001F44E",
+                id={"type": "kb-thumbs", "action": "down",
+                    "kb_id": kb_id, "chunk_id": chunk_id},
+                n_clicks=0,
+                title="Demote this source for similar questions",
+                className="kb-thumb-btn kb-thumb-down",
+                **{"aria-label": f"Thumbs down for {ref.get('label', 'source')}"},
+            ),
+            html.Span(
+                "",
+                id={"type": "kb-thumbs-status",
+                    "kb_id": kb_id, "chunk_id": chunk_id},
+                className="kb-thumbs-status",
+            ),
+        ],
+        className="kb-ref-cell-thumbs",
+    )
+
+
 def _render_references_panel(turn: Dict[str, Any]) -> Any:
     refs = turn.get("references") or []
     if not refs:
@@ -403,6 +491,7 @@ def _render_references_panel(turn: Dict[str, Any]) -> Any:
                     html.Div(r.get("label", "?"), className="kb-ref-cell-label"),
                     html.Div(sim_text, className="kb-ref-cell-sim"),
                     html.Div(cell_children, className="kb-ref-cell-main"),
+                    _render_thumbs_cell(r),
                 ],
                 className="kb-ref-row",
             )
@@ -428,6 +517,79 @@ def _render_references_panel(turn: Dict[str, Any]) -> Any:
     )
 
 
+_CONTENT_TYPE_LABEL = {
+    "file_summary": "File summary",
+    "page_summary": "Page summary",
+    "text": "Source passage",
+    "parent": "Source passage",
+}
+
+
+def _cite_modal_title(ctx: Dict[str, Any]) -> str:
+    file_label = ctx.get("file") or "Source"
+    loc_bits: List[str] = []
+    if ctx.get("page") is not None:
+        loc_bits.append(f"page {ctx['page']}")
+    elif ctx.get("slide") is not None:
+        loc_bits.append(f"slide {ctx['slide']}")
+    suffix = f" · {' · '.join(loc_bits)}" if loc_bits else ""
+    return f"{file_label}{suffix}"
+
+
+def _cite_modal_body(ctx: Dict[str, Any]) -> Any:
+    chunk_text = (ctx.get("chunk_text") or "").strip()
+    parent_text = (ctx.get("parent_text") or "").strip()
+    kind_label = _CONTENT_TYPE_LABEL.get(
+        ctx.get("content_type") or "text", "Source passage",
+    )
+
+    # Summary chunks (or pre-Phase-4 KBs without parents) just show the
+    # body verbatim — no parent window exists.
+    if not parent_text:
+        return html.Div(
+            [
+                html.Div(kind_label, className="kb-cite-section-label"),
+                html.Pre(chunk_text or "(empty)",
+                         className="kb-cite-body kb-cite-body-plain"),
+            ],
+            className="kb-cite-modal-inner",
+        )
+
+    # Parent text exists. Highlight the cited child chunk inside the
+    # parent window when it's a clean substring; otherwise show both
+    # blocks separately.
+    if chunk_text and chunk_text in parent_text:
+        before, _, after = parent_text.partition(chunk_text)
+        body_pre = html.Pre(
+            [
+                before,
+                html.Mark(chunk_text, className="kb-cite-mark"),
+                after,
+            ],
+            className="kb-cite-body",
+        )
+        return html.Div(
+            [
+                html.Div("Cited passage in context (highlighted)",
+                         className="kb-cite-section-label"),
+                body_pre,
+            ],
+            className="kb-cite-modal-inner",
+        )
+
+    return html.Div(
+        [
+            html.Div("Cited passage", className="kb-cite-section-label"),
+            html.Pre(chunk_text or "(empty)",
+                     className="kb-cite-body kb-cite-body-cited"),
+            html.Div("Surrounding context",
+                     className="kb-cite-section-label"),
+            html.Pre(parent_text, className="kb-cite-body"),
+        ],
+        className="kb-cite-modal-inner",
+    )
+
+
 def _render_message(turn: Dict[str, Any]) -> html.Div:
     role = turn.get("role", "user")
     bubble_cls = "kb-msg kb-msg--user" if role == "user" else "kb-msg kb-msg--assistant"
@@ -443,11 +605,26 @@ def _render_message(turn: Dict[str, Any]) -> html.Div:
             label_parts.append(file_label)
             if loc:
                 label_parts.append(f" · {loc}")
-            chips.append(
-                dbc.Badge("".join(label_parts), color="light",
-                          text_color="primary", pill=True,
-                          className="kb-cite-chip")
-            )
+            label_text = "".join(label_parts)
+            kb_id = c.get("kb_id")
+            chunk_id = c.get("chunk_id")
+            if kb_id and chunk_id:
+                chips.append(
+                    html.Button(
+                        label_text,
+                        id={"type": "kb-cite", "kb_id": kb_id,
+                            "chunk_id": chunk_id},
+                        n_clicks=0,
+                        className="kb-cite-chip kb-cite-chip-btn",
+                        title="Show full source passage",
+                    )
+                )
+            else:
+                chips.append(
+                    dbc.Badge(label_text, color="light",
+                              text_color="primary", pill=True,
+                              className="kb-cite-chip")
+                )
         children.append(html.Div(chips, className="kb-cite-row"))
     bubble = html.Div(children, className=bubble_cls)
     if role == "assistant":
@@ -539,23 +716,28 @@ def _chat_pane(kb: Dict[str, Any], history: Dict[str, Any] | None,
     )
 
 
-def _right_pane(view_mode: str, selected_id: str | None,
+def _right_pane(view_mode: str, selected,
                 history: Dict[str, Any] | None,
                 scope_value: str | None) -> Any:
-    if not selected_id or view_mode == "welcome":
+    ids = _as_id_list(selected)
+    if not ids or view_mode == "welcome":
         return _welcome_pane()
-    kb = _resolve_source_summary(selected_id)
+    kb = _resolve_source_summary(ids)
     if kb is None:
         return _welcome_pane()
+    # Multi-select always goes to chat — no single detail/upload pane makes
+    # sense when multiple sources are active.
+    if len(ids) > 1:
+        return _chat_pane(kb, history, scope_value)
     # Domain sources are read-only: never show the detail/upload pane.
-    if is_domain_source_id(selected_id) or view_mode == "chat":
+    if is_domain_source_id(ids[0]) or view_mode == "chat":
         return _chat_pane(kb, history, scope_value)
     return _detail_pane(kb)
 
 
 layout = html.Div(
     [
-        dcc.Store(id="kb-selected-id", storage_type="session", data=None),
+        dcc.Store(id="kb-selected-id", storage_type="session", data=[]),
         dcc.Store(id="kb-view-mode", storage_type="session", data="welcome"),
         dcc.Store(id="kb-chat-history", storage_type="session", data={"kb_id": None, "turns": []}),
         dcc.Store(id="kb-chat-scope", storage_type="session", data="__all__"),
@@ -588,6 +770,39 @@ layout = html.Div(
             is_open=False,
             centered=True,
         ),
+        dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle(id="kb-cite-modal-title")),
+                dbc.ModalBody(id="kb-cite-modal-body", className="kb-cite-modal-body"),
+                dbc.ModalFooter(
+                    dbc.Button("Close", id="kb-cite-modal-close",
+                               color="secondary", outline=True)
+                ),
+            ],
+            id="kb-cite-modal",
+            is_open=False,
+            size="lg",
+            scrollable=True,
+            centered=True,
+        ),
+        dcc.Store(id="kb-pending-delete", data=None),
+        dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle("Delete knowledge base?")),
+                dbc.ModalBody(id="kb-delete-modal-body"),
+                dbc.ModalFooter(
+                    [
+                        dbc.Button("Cancel", id="kb-delete-cancel",
+                                   color="secondary", outline=True),
+                        dbc.Button("Delete permanently",
+                                   id="kb-delete-confirm", color="danger"),
+                    ]
+                ),
+            ],
+            id="kb-delete-modal",
+            is_open=False,
+            centered=True,
+        ),
         html.Div(
             [
                 html.Aside(
@@ -602,7 +817,7 @@ layout = html.Div(
                             className="kb-side-header",
                         ),
                         html.Div(id="kb-list", className="kb-list",
-                                 children=_render_kb_list(None)),
+                                 children=_render_kb_list([])),
                     ],
                     className="kb-side",
                     **{"aria-label": "Knowledge base list"},
@@ -759,7 +974,7 @@ def register_callbacks(app: Dash):
             except Exception as e:
                 logger.exception(f"create_kb failed: {e}")
                 return True, dash.no_update, dash.no_update, f"Error: {e}", dash.no_update, dash.no_update, dash.no_update
-            return False, "", "", "", (tick or 0) + 1, kb["id"], "detail"
+            return False, "", "", "", (tick or 0) + 1, [kb["id"]], "detail"
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     @app.callback(
@@ -767,8 +982,8 @@ def register_callbacks(app: Dash):
         Input("kb-selected-id", "data"),
         Input("kb-refresh-tick", "data"),
     )
-    def refresh_kb_list(selected_id, _tick):
-        return _render_kb_list(selected_id)
+    def refresh_kb_list(selected, _tick):
+        return _render_kb_list(selected)
 
     @app.callback(
         Output("kb-selected-id", "data", allow_duplicate=True),
@@ -779,19 +994,28 @@ def register_callbacks(app: Dash):
         State("kb-selected-id", "data"),
         prevent_initial_call=True,
     )
-    def select_kb(n_clicks_list, ids, current_id):
+    def select_kb(n_clicks_list, ids, current):
         if not any(n_clicks_list or []):
             return dash.no_update, dash.no_update, dash.no_update
         trig = callback_context.triggered_id
         if not trig or "id" not in trig:
             return dash.no_update, dash.no_update, dash.no_update
-        new_id = trig["id"]
-        # Reset the chat scope when switching sources so a stale "scoped
-        # to file X" from the previous KB doesn't bleed in.
-        scope_reset = "__all__" if new_id != current_id else dash.no_update
-        # Domain sources are read-only — skip the detail pane entirely.
-        mode = "chat" if is_domain_source_id(new_id) else "detail"
-        return new_id, mode, scope_reset
+        clicked = trig["id"]
+        cur = _as_id_list(current)
+        if clicked in cur:
+            cur.remove(clicked)
+        else:
+            cur.append(clicked)
+        # Any selection change resets the scope so a stale "scoped to X"
+        # from a previous selection doesn't bleed in.
+        scope_reset = "__all__"
+        if not cur:
+            mode = "welcome"
+        elif len(cur) == 1:
+            mode = "chat" if is_domain_source_id(cur[0]) else "detail"
+        else:
+            mode = "chat"
+        return cur, mode, scope_reset
 
     @app.callback(
         Output("kb-view-mode", "data", allow_duplicate=True),
@@ -821,8 +1045,8 @@ def register_callbacks(app: Dash):
         Input("kb-chat-history", "data"),
         State("kb-chat-scope", "data"),
     )
-    def render_right_pane(view_mode, selected_id, _tick, history, scope_value):
-        return _right_pane(view_mode or "welcome", selected_id, history, scope_value)
+    def render_right_pane(view_mode, selected, _tick, history, scope_value):
+        return _right_pane(view_mode or "welcome", selected, history, scope_value)
 
     @app.callback(
         Output("kb-chat-scope", "data"),
@@ -840,9 +1064,11 @@ def register_callbacks(app: Dash):
         State("kb-selected-id", "data"),
         prevent_initial_call=True,
     )
-    def handle_upload(contents, filenames, kb_id):
-        if not contents or not kb_id:
+    def handle_upload(contents, filenames, selected):
+        ids = _as_id_list(selected)
+        if not contents or len(ids) != 1:
             return dash.no_update, dash.no_update
+        kb_id = ids[0]
         contents_list = contents if isinstance(contents, list) else [contents]
         filenames_list = filenames if isinstance(filenames, list) else [filenames]
         items = [
@@ -879,9 +1105,11 @@ def register_callbacks(app: Dash):
         State("kb-refresh-tick", "data"),
         prevent_initial_call=True,
     )
-    def poll_ingest(_n, kb_id, tick):
-        if not kb_id:
+    def poll_ingest(_n, selected, tick):
+        ids = _as_id_list(selected)
+        if len(ids) != 1:
             return dash.no_update, True, dash.no_update
+        kb_id = ids[0]
         state = _ingest_state(kb_id)
         status = state.get("status")
         if not status or status == "idle":
@@ -906,9 +1134,11 @@ def register_callbacks(app: Dash):
                 ],
                 className="kb-ingest-status",
             )
-            # Bump refresh tick during running too so the files list updates as
-            # each file completes.
-            return inner, False, (tick or 0) + 1 if file_done else dash.no_update
+            # Don't bump the refresh tick mid-run: it's an Input to
+            # render_right_pane, which would rebuild the whole pane (and
+            # wipe `kb-upload-status`) on every poll. Files list refreshes
+            # once at the terminal status below.
+            return inner, False, dash.no_update
 
         # status == "done" (or anything else terminal)
         results = state.get("results") or []
@@ -935,43 +1165,96 @@ def register_callbacks(app: Dash):
         State("kb-refresh-tick", "data"),
         prevent_initial_call=True,
     )
-    def delete_file(n_clicks_list, ids, kb_id, tick):
-        if not any(n_clicks_list or []) or not kb_id:
+    def delete_file(n_clicks_list, ids, selected, tick):
+        sel_ids = _as_id_list(selected)
+        if not any(n_clicks_list or []) or len(sel_ids) != 1:
             return dash.no_update
         trig = callback_context.triggered_id
         if not trig or "id" not in trig:
             return dash.no_update
         try:
-            KBService(kb_id).delete_file(trig["id"])
+            KBService(sel_ids[0]).delete_file(trig["id"])
         except Exception as e:
             logger.exception(f"delete_file failed: {e}")
         return (tick or 0) + 1
 
     @app.callback(
+        Output("kb-delete-modal", "is_open"),
+        Output("kb-delete-modal-body", "children"),
+        Output("kb-pending-delete", "data"),
+        Input({"type": "kb-delete-kb", "id": ALL}, "n_clicks"),
+        Input("kb-delete-cancel", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_delete_modal(n_clicks_list, _cancel_clicks):
+        trig = callback_context.triggered_id
+        if trig == "kb-delete-cancel":
+            return False, dash.no_update, None
+        if not isinstance(trig, dict) or trig.get("type") != "kb-delete-kb":
+            raise dash.exceptions.PreventUpdate
+        if not any(n_clicks_list or []):
+            raise dash.exceptions.PreventUpdate
+        kb_id = trig["id"]
+        kb = kb_registry.get_kb(kb_id) or {}
+        name = kb.get("name") or kb_id
+        files_count = len(kb.get("files") or [])
+        chunks_count = int(kb.get("doc_count") or 0)
+        body = html.Div(
+            [
+                html.P(
+                    [
+                        "Are you sure you want to delete ",
+                        html.Strong(name),
+                        "?",
+                    ],
+                ),
+                html.P(
+                    f"{files_count} file{'s' if files_count != 1 else ''} · "
+                    f"{chunks_count} indexed chunk{'s' if chunks_count != 1 else ''} "
+                    "will be removed from disk.",
+                    className="text-muted",
+                    style={"fontSize": "13px"},
+                ),
+                html.P(
+                    "This cannot be undone. You'll need to re-upload every "
+                    "source file to rebuild it.",
+                    style={"color": "var(--color-danger)", "fontSize": "13px",
+                           "marginBottom": 0},
+                ),
+            ]
+        )
+        return True, body, kb_id
+
+    @app.callback(
         Output("kb-refresh-tick", "data", allow_duplicate=True),
         Output("kb-selected-id", "data", allow_duplicate=True),
         Output("kb-view-mode", "data", allow_duplicate=True),
-        Input({"type": "kb-delete-kb", "id": ALL}, "n_clicks"),
-        State({"type": "kb-delete-kb", "id": ALL}, "id"),
+        Output("kb-delete-modal", "is_open", allow_duplicate=True),
+        Output("kb-pending-delete", "data", allow_duplicate=True),
+        Input("kb-delete-confirm", "n_clicks"),
+        State("kb-pending-delete", "data"),
         State("kb-selected-id", "data"),
         State("kb-refresh-tick", "data"),
         prevent_initial_call=True,
     )
-    def delete_kb(n_clicks_list, ids, selected_id, tick):
-        if not any(n_clicks_list or []):
-            return dash.no_update, dash.no_update, dash.no_update
-        trig = callback_context.triggered_id
-        if not trig or "id" not in trig:
-            return dash.no_update, dash.no_update, dash.no_update
-        kb_id = trig["id"]
+    def confirm_delete_kb(n_clicks, kb_id, selected, tick):
+        if not n_clicks or not kb_id:
+            raise dash.exceptions.PreventUpdate
         try:
             kb_registry.delete_kb(kb_id)
         except Exception as e:
             logger.exception(f"delete_kb failed: {e}")
-            return dash.no_update, dash.no_update, dash.no_update
-        new_sel = None if selected_id == kb_id else selected_id
-        new_view = "welcome" if selected_id == kb_id else dash.no_update
-        return (tick or 0) + 1, new_sel, new_view
+            return dash.no_update, dash.no_update, dash.no_update, False, None
+        cur = _as_id_list(selected)
+        if kb_id in cur:
+            cur.remove(kb_id)
+        if not cur:
+            new_view = "welcome"
+        elif len(cur) == 1:
+            new_view = "chat" if is_domain_source_id(cur[0]) else "detail"
+        else:
+            new_view = "chat"
+        return (tick or 0) + 1, cur, new_view, False, None
 
     @app.callback(
         Output("kb-reingest-tick", "disabled"),
@@ -980,9 +1263,11 @@ def register_callbacks(app: Dash):
         State("kb-selected-id", "data"),
         prevent_initial_call=True,
     )
-    def on_reingest_click(n_clicks, kb_id):
-        if not n_clicks or not kb_id:
+    def on_reingest_click(n_clicks, selected):
+        ids = _as_id_list(selected)
+        if not n_clicks or len(ids) != 1:
             return dash.no_update, dash.no_update
+        kb_id = ids[0]
         if _reingest_status(kb_id).get("status") == "running":
             return False, dash.no_update
         _start_reingest(kb_id)
@@ -997,9 +1282,11 @@ def register_callbacks(app: Dash):
         State("kb-refresh-tick", "data"),
         prevent_initial_call=True,
     )
-    def poll_reingest(_n, kb_id, tick):
-        if not kb_id:
+    def poll_reingest(_n, selected, tick):
+        ids = _as_id_list(selected)
+        if len(ids) != 1:
             return dash.no_update, True, dash.no_update
+        kb_id = ids[0]
         state = _reingest_status(kb_id)
         status = state.get("status")
         if not status or status == "idle":
@@ -1038,18 +1325,28 @@ def register_callbacks(app: Dash):
         State("kb-selected-id", "data"),
         State("kb-chat-history", "data"),
         State("kb-chat-scope", "data"),
+        running=[
+            (Output("kb-send", "disabled"), True, False),
+            (Output("kb-send", "children"),
+             [html.Span(className="kb-send-spinner",
+                        **{"aria-hidden": "true"}),
+              html.Span("Searching…", className="kb-send-label")],
+             "Send"),
+        ],
         prevent_initial_call=True,
     )
-    def send_message(n_clicks, text, kb_id, history, scope_value):
-        if not n_clicks or not kb_id:
+    def send_message(n_clicks, text, selected, history, scope_value):
+        sel_ids = _as_id_list(selected)
+        if not n_clicks or not sel_ids:
             return dash.no_update, dash.no_update, dash.no_update
         text = (text or "").strip()
         if not text:
             return dash.no_update, dash.no_update, "Type a question first."
 
+        hist_key = _sel_key(sel_ids)
         history = history or {"kb_id": None, "turns": []}
-        if history.get("kb_id") != kb_id:
-            history = {"kb_id": kb_id, "turns": []}
+        if history.get("kb_id") != hist_key:
+            history = {"kb_id": hist_key, "turns": []}
         turns = list(history.get("turns") or [])
         turns.append({"role": "user", "content": text,
                       "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")})
@@ -1058,8 +1355,9 @@ def register_callbacks(app: Dash):
         if scope_value and scope_value != "__all__":
             explicit_scope = [scope_value]
 
+        engine_arg = sel_ids[0] if len(sel_ids) == 1 else sel_ids
         try:
-            result = KBChatEngine(kb_id).answer(
+            result = KBChatEngine(engine_arg).answer(
                 turns[:-1], text, source_files=explicit_scope
             )
         except Exception as e:
@@ -1069,7 +1367,7 @@ def register_callbacks(app: Dash):
                           "citations": [],
                           "references": [],
                           "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")})
-            return {"kb_id": kb_id, "turns": turns}, "", f"Error: {e}"
+            return {"kb_id": hist_key, "turns": turns}, "", f"Error: {e}"
 
         turns.append({
             "role": "assistant",
@@ -1092,4 +1390,69 @@ def register_callbacks(app: Dash):
             status += f" · auto-scoped to {', '.join(result.get('scope') or [])}"
         elif result.get("scope"):
             status += f" · scoped to {', '.join(result['scope'])}"
-        return {"kb_id": kb_id, "turns": turns}, "", status
+        return {"kb_id": hist_key, "turns": turns}, "", status
+
+    @app.callback(
+        Output({"type": "kb-thumbs-status",
+                "kb_id": MATCH, "chunk_id": MATCH}, "children"),
+        Input({"type": "kb-thumbs", "action": ALL,
+               "kb_id": MATCH, "chunk_id": MATCH}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def handle_thumbs_feedback(n_clicks_list):
+        if not any(n_clicks_list or []):
+            raise dash.exceptions.PreventUpdate
+        trig = callback_context.triggered_id
+        if not trig or trig.get("type") != "kb-thumbs":
+            raise dash.exceptions.PreventUpdate
+        action = trig.get("action")
+        kb_id = trig.get("kb_id")
+        chunk_id = trig.get("chunk_id")
+        if not kb_id or not chunk_id or action not in ("up", "down"):
+            raise dash.exceptions.PreventUpdate
+        priority = float(
+            Config.USE_CASE_TG_THUMBS_UP_PRIORITY if action == "up"
+            else Config.USE_CASE_TG_THUMBS_DOWN_PRIORITY
+        )
+        try:
+            ok = KBService(kb_id).set_chunk_priority(chunk_id, priority)
+        except Exception as e:
+            logger.exception(f"thumbs feedback failed for {kb_id}/{chunk_id}: {e}")
+            return f"⚠ {e}"
+        if not ok:
+            return "⚠ not saved"
+        return "\U0001F44D saved" if action == "up" else "\U0001F44E saved"
+
+    @app.callback(
+        Output("kb-cite-modal", "is_open"),
+        Output("kb-cite-modal-title", "children"),
+        Output("kb-cite-modal-body", "children"),
+        Input({"type": "kb-cite", "kb_id": ALL, "chunk_id": ALL}, "n_clicks"),
+        Input("kb-cite-modal-close", "n_clicks"),
+        State("kb-cite-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def show_cite_modal(_chip_clicks, _close_clicks, is_open):
+        trig = callback_context.triggered_id
+        if trig == "kb-cite-modal-close":
+            return False, dash.no_update, dash.no_update
+        if not isinstance(trig, dict) or trig.get("type") != "kb-cite":
+            raise dash.exceptions.PreventUpdate
+        # Filter out the spurious n_clicks=0 from layout-mount that pattern
+        # matching can fire on first render.
+        if not any(_chip_clicks or []):
+            raise dash.exceptions.PreventUpdate
+        kb_id = trig.get("kb_id")
+        chunk_id = trig.get("chunk_id")
+        try:
+            ctx = KBService(kb_id).get_parent_context(chunk_id)
+        except Exception as e:
+            logger.exception(f"cite modal lookup failed for {kb_id}/{chunk_id}: {e}")
+            return True, "Source unavailable", html.Div(f"Error: {e}", className="kb-cite-error")
+        if ctx is None:
+            return True, "Source unavailable", html.Div(
+                "This source no longer exists in the knowledge base — it may "
+                "have been deleted or re-ingested.",
+                className="kb-cite-error",
+            )
+        return True, _cite_modal_title(ctx), _cite_modal_body(ctx)

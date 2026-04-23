@@ -357,6 +357,13 @@ class KBService:
             return {"source_file": files[0]}
         return {"source_file": {"$in": files}}
 
+    @staticmethod
+    def _priority_fn(meta: Dict[str, Any]) -> float:
+        try:
+            return float(meta.get("priority", Config.USE_CASE_TG_DEFAULT_PRIORITY))
+        except (TypeError, ValueError):
+            return float(Config.USE_CASE_TG_DEFAULT_PRIORITY)
+
     def query_text(self, question: str, k: int = 5,
                    source_files: Optional[List[str]] = None,
                    hyde: Optional[bool] = None) -> List[Dict[str, Any]]:
@@ -369,6 +376,7 @@ class KBService:
             question=question,
             k=k,
             where=where,
+            priority_fn=self._priority_fn,
             log_tag=f"KB[{self.kb_id}]",
             hyde=hyde,
         )
@@ -416,6 +424,81 @@ class KBService:
         res = self._image_collection.query(**kwargs)
         hits = _shape_hits(res)
         return [h for h in hits if h.get("similarity", 0.0) >= min_similarity]
+
+    def set_chunk_priority(self, chunk_id: str, priority: float) -> bool:
+        """Bump a single chunk's `priority` metadata, written to both the
+        Chroma collection (used by the dense leg) and the BM25 sidecar
+        (used by the BM25 leg). Read by the retriever's `priority_fn`."""
+        if not chunk_id:
+            return False
+        priority = max(0.0, min(1.0, float(priority)))
+        try:
+            got = self._text_collection.get(ids=[chunk_id], include=["metadatas"])
+        except Exception as e:
+            logger.warning(f"KB[{self.kb_id}] set_chunk_priority get failed for {chunk_id}: {e}")
+            return False
+        ids = got.get("ids") or []
+        if not ids:
+            logger.warning(f"KB[{self.kb_id}] set_chunk_priority: chunk {chunk_id} not found")
+            return False
+        existing = (got.get("metadatas") or [{}])[0] or {}
+        merged = {**existing, "priority": priority}
+        try:
+            self._text_collection.update(ids=[chunk_id], metadatas=[merged])
+        except Exception as e:
+            logger.warning(f"KB[{self.kb_id}] set_chunk_priority update failed for {chunk_id}: {e}")
+            return False
+        try:
+            for i, did in enumerate(self._bm25.doc_ids):
+                if did == chunk_id:
+                    self._bm25.metadatas[i] = {**(self._bm25.metadatas[i] or {}), "priority": priority}
+                    self._bm25.save()
+                    break
+        except Exception as e:
+            logger.debug(f"KB[{self.kb_id}] BM25 priority sync skipped for {chunk_id}: {e}")
+        logger.info(f"KB[{self.kb_id}] priority={priority:.2f} set on chunk {chunk_id}")
+        return True
+
+    def get_parent_context(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a chunk + its parent-window text for the citation modal.
+
+        Returns None if the chunk no longer exists (file was deleted /
+        re-ingested under new ids). For summary chunks (which have no
+        parent), parent_text is None and chunk_text holds the body.
+        """
+        if not chunk_id:
+            return None
+        try:
+            got = self._text_collection.get(
+                ids=[chunk_id], include=["documents", "metadatas"],
+            )
+        except Exception as e:
+            logger.warning(f"KB[{self.kb_id}] get_parent_context get failed for {chunk_id}: {e}")
+            return None
+        ids = got.get("ids") or []
+        if not ids:
+            return None
+        chunk_text = (got.get("documents") or [""])[0] or ""
+        meta = (got.get("metadatas") or [{}])[0] or {}
+        parent_text: Optional[str] = None
+        parent_id = meta.get("parent_id")
+        if parent_id:
+            try:
+                rec = self._parents.get_many([parent_id]).get(parent_id)
+                if rec:
+                    parent_text = rec.get("text")
+            except Exception as e:
+                logger.debug(f"KB[{self.kb_id}] parent fetch for {parent_id} failed: {e}")
+        return {
+            "chunk_id": chunk_id,
+            "chunk_text": chunk_text,
+            "parent_id": parent_id,
+            "parent_text": parent_text,
+            "file": meta.get("source_file"),
+            "page": meta.get("page"),
+            "slide": meta.get("slide"),
+            "content_type": meta.get("content_type", "text"),
+        }
 
     def list_files(self) -> List[Dict[str, Any]]:
         kb = kb_registry.get_kb(self.kb_id)

@@ -17,17 +17,139 @@ from models.llm_factory import build_llm
 from utilities.customlogger import logger
 
 
-def _build_source(source_id: str):
-    """Return a KBService-like object for either a user KB id or a
-    ``domain:<profile_name>`` virtual id."""
+def _build_source(source_id):
+    """Return a KBService-like object for a user KB id, a
+    ``domain:<profile_name>`` virtual id, or a list of either (in which
+    case a ``MultiSource`` fan-out wrapper is returned)."""
     from models.domain_store import DomainSource, is_domain_source_id, profile_name_from_source_id
+
+    if isinstance(source_id, (list, tuple)):
+        ids = [sid for sid in source_id if sid]
+        if len(ids) == 1:
+            return _build_source(ids[0])
+        return MultiSource([_build_source(sid) for sid in ids])
 
     if is_domain_source_id(source_id):
         return DomainSource(profile_name_from_source_id(source_id))
     return KBService(source_id)
 
 
+class MultiSource:
+    """Fan-out wrapper that presents N sources as a single KB-like object.
+
+    Satisfies the same duck-type contract as ``KBService`` / ``DomainSource``
+    (``.kb`` dict, ``.kb_id``, ``.list_files()``, ``.query_text()``,
+    ``.query_images()``). ``query_*`` calls fan out to each underlying
+    source, then merge and truncate by similarity so no single source
+    drowns the others."""
+
+    def __init__(self, sources: List[Any]) -> None:
+        self.sources = sources
+        ids = [getattr(s, "kb_id", "") for s in sources]
+        names = []
+        for s in sources:
+            kb = getattr(s, "kb", None)
+            if isinstance(kb, dict):
+                names.append(kb.get("name") or kb.get("id") or "")
+            else:
+                names.append(getattr(s, "kb_id", "") or "")
+        self.kb_id = "|".join(ids)
+        self.kb = {
+            "id": self.kb_id,
+            "name": " + ".join(n for n in names if n) or "Combined",
+            "description": f"Combined view across {len(sources)} sources.",
+        }
+
+    def list_files(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        for s in self.sources:
+            try:
+                files = s.list_files() or []
+            except Exception:
+                continue
+            for f in files:
+                key = (f.get("file_id") or "", f.get("source_file") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(f)
+        return out
+
+    @staticmethod
+    def _sim(hit: Dict[str, Any]) -> float:
+        return float(hit.get("similarity", 0.0) or 0.0)
+
+    def _merge_hits_by_source(self, grouped: Dict[str, List[Dict[str, Any]]],
+                              k: Optional[int]) -> List[Dict[str, Any]]:
+        """Merge per-source hit lists with a floor of 1-per-source so a
+        small store (e.g. 2 records) isn't evicted by a larger store's
+        higher-similarity hits when we truncate to ``k``."""
+        all_hits = [h for hits in grouped.values() for h in hits]
+        all_hits.sort(key=self._sim, reverse=True)
+
+        if not k:
+            return all_hits
+
+        k = int(k)
+        non_empty = [hits for hits in grouped.values() if hits]
+        n = len(non_empty)
+        # Floor doesn't fit: just take global top-k.
+        if n == 0 or k < n:
+            return all_hits[:k]
+
+        result: List[Dict[str, Any]] = []
+        leftovers: List[Dict[str, Any]] = []
+        for hits in non_empty:
+            sorted_hits = sorted(hits, key=self._sim, reverse=True)
+            result.append(sorted_hits[0])
+            leftovers.extend(sorted_hits[1:])
+
+        leftovers.sort(key=self._sim, reverse=True)
+        remaining = max(0, k - len(result))
+        result.extend(leftovers[:remaining])
+        result.sort(key=self._sim, reverse=True)
+        return result
+
+    def query_text(self, question: str, k: Optional[int] = None,
+                   source_files: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for s in self.sources:
+            key = getattr(s, "kb_id", None) or str(id(s))
+            try:
+                grouped[key] = s.query_text(question, k=k, source_files=source_files) or []
+            except Exception as e:
+                logger.warning(f"MultiSource: query_text failed on {key}: {e}")
+                grouped[key] = []
+        return self._merge_hits_by_source(grouped, k)
+
+    def query_images(self, question: str, k: Optional[int] = 2,
+                     source_files: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for s in self.sources:
+            key = getattr(s, "kb_id", None) or str(id(s))
+            try:
+                grouped[key] = s.query_images(question, k=k, source_files=source_files) or []
+            except Exception as e:
+                logger.warning(f"MultiSource: query_images failed on {key}: {e}")
+                grouped[key] = []
+        return self._merge_hits_by_source(grouped, k)
+
+
 _CITE_RE = re.compile(r"\[(S|I)(\d+)\]")
+
+# Catches `[S1](anything)` style Markdown links that the LLM sometimes
+# emits despite being told to use plain bracketed markers. dcc.Markdown
+# would render those as real <a> tags whose href resolves against the
+# current page, so clicking would just navigate to the same /knowledge-base
+# route. We strip the link wrapper and keep the bare marker.
+_CITE_LINK_RE = re.compile(r"\[((?:S|I)\d+)\]\([^)]*\)")
+
+
+def _strip_citation_links(answer: str) -> str:
+    if not answer:
+        return answer
+    return _CITE_LINK_RE.sub(r"[\1]", answer)
 
 
 def _snippet(text: str, n: int = 220) -> str:
@@ -102,7 +224,9 @@ def build_prompt(kb_name: str,
     )
     lines.append(
         "Prefer the provided SOURCES. If they contain the answer, use them and cite "
-        "inline as [S1], [S2] for text and [I1] for images. If the sources only "
+        "inline as [S1], [S2] for text and [I1] for images. Write citations as "
+        "PLAIN bracketed text only — never wrap them in Markdown link syntax "
+        "(do NOT write [S1](...), [S1][], or any href). If the sources only "
         "partially cover the question, give a best-effort answer from what IS there "
         "and note what is uncertain or missing. Only answer \"I don't know\" when "
         "the sources are empty or clearly unrelated to the question."
@@ -196,14 +320,23 @@ def _parse_citations(answer: str,
             continue
         hit = pool[idx]
         meta = hit.get("metadata") or {}
-        cites.append({
+        cite = {
             "label": key,
             "kind": "text" if kind == "S" else "image",
             "file": meta.get("source_file"),
             "file_id": meta.get("file_id"),
             "page": meta.get("page"),
             "slide": meta.get("slide"),
-        })
+        }
+        # chunk_id + kb_id let the chip become a clickable target that
+        # opens the parent-context modal. Domain-store hits have no
+        # kb_id and image hits don't carry parents; both fall through
+        # as plain non-clickable badges.
+        chunk_id = hit.get("id") or meta.get("chunk_id")
+        if cite["kind"] == "text" and not _is_domain_hit(hit) and chunk_id and meta.get("kb_id"):
+            cite["chunk_id"] = chunk_id
+            cite["kb_id"] = meta["kb_id"]
+        cites.append(cite)
     return cites
 
 
@@ -254,6 +387,20 @@ def _hit_to_reference(hit: Dict[str, Any], label: str, kind: str) -> Dict[str, A
         ref["via"] = hit["via"]
     if "rerank_score" in hit:
         ref["rerank_score"] = round(float(hit["rerank_score"]), 3)
+
+    # chunk_id + kb_id let the UI surface a thumbs-up/down on the row that
+    # writes back to the originating KB. Skipped for domain-store hits and
+    # images — those go through a different feedback path.
+    chunk_id = hit.get("id") or meta.get("chunk_id")
+    if kind == "text" and not _is_domain_hit(hit) and chunk_id and meta.get("kb_id"):
+        ref["chunk_id"] = chunk_id
+        ref["kb_id"] = meta["kb_id"]
+        existing_priority = meta.get("priority")
+        if existing_priority is not None:
+            try:
+                ref["priority"] = round(float(existing_priority), 3)
+            except (TypeError, ValueError):
+                pass
     return ref
 
 
@@ -264,7 +411,7 @@ class KBChatEngine:
     ``.list_files()``, ``.query_text()``, and ``.query_images()`` — both
     ``KBService`` and ``DomainSource`` satisfy this."""
 
-    def __init__(self, source_id: str) -> None:
+    def __init__(self, source_id) -> None:
         self.source = _build_source(source_id)
         # Backwards-compat alias: existing code reads `self.kb` as the source.
         self.kb = self.source
@@ -308,6 +455,11 @@ class KBChatEngine:
         except Exception as e:
             logger.exception(f"KBChatEngine LLM invocation failed: {e}")
             raise
+
+        # Defensive scrub: turn any `[S1](...)` markdown-link wrappers the
+        # LLM emitted back into plain `[S1]` so dcc.Markdown won't render
+        # them as same-page <a> tags.
+        answer_text = _strip_citation_links(answer_text)
 
         citations = _parse_citations(answer_text, text_hits, image_hits)
         references = (
